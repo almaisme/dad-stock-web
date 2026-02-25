@@ -1,93 +1,100 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>台股搜尋器 V1.0</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 
 <body>
-  <div class="wrap">
-    <!-- 頂部：標題＋一鍵搜尋 -->
-    <header class="hero">
-      <div class="heroTitle">台股搜尋器　<span class="ver">V1.0</span></div>
-      <button id="scanBtn" class="scanBtn" onclick="scan()">一鍵搜尋</button>
-    </header>
+  <!-- 中文備註：頁首 -->
+  <header class="topbar">
+    <div class="topTitle">
+      <div class="title">台股搜尋器</div>
+      <div class="ver">V1.0</div>
+    </div>
 
-    <!-- 主體：左規則欄 + 右內容 -->
-    <main class="layout">
-      <!-- 左側：規則欄（像截圖左邊那條） -->
-      <aside class="sideBar">
-        <div class="sideBarText">規則</div>
+    <button id="scanBtn" class="primaryBtn" onclick="scan()">一鍵搜尋</button>
+  </header>
+
+  <!-- 中文備註：主內容區（左側規則標籤＋右側卡片） -->
+  <main class="wrap">
+    <section class="layout">
+      <!-- 左側直條 -->
+      <aside class="sideTag">
+        <div class="sideText">規則</div>
       </aside>
 
-      <!-- 右側：規則設定卡片 + 搜尋結果卡片 -->
+      <!-- 右側內容 -->
       <section class="content">
-        <!-- 規則卡片 -->
-        <section class="card">
-          <div class="cardHead">
+        <!-- 規則卡 -->
+        <div class="card">
+          <div class="cardHeader">
             <div class="cardTitle">可隨意修改規則</div>
-            <div class="dataSource">資料來源：Yahoo！股市</div>
+            <div class="cardHint">資料來源：Yahoo！股市</div>
           </div>
 
-          <div class="ruleGrid">
+          <!-- 中文備註：規則輸入（6 格） -->
+          <div class="grid6">
             <div class="ruleBox">
-              <div class="label">均線（短 / 中 / 長）</div>
-              <input id="maStr" class="input" value="5,10,20" />
+              <div class="ruleLabel">均線（短 / 中 / 長）</div>
+              <input id="maStr" class="ruleInput" value="5,10,20" />
             </div>
 
             <div class="ruleBox">
-              <div class="label">糾結回看天數</div>
-              <input id="tangleLookback" class="input" type="number" value="10" min="1" />
+              <div class="ruleLabel">糾結回看天數</div>
+              <input id="tangleLookback" class="ruleInput" value="10" />
             </div>
 
             <div class="ruleBox">
-              <div class="label">糾結最大擴散（%）</div>
-              <input id="tangleSpreadPct" class="input" type="number" value="1.5" step="0.1" min="0" />
+              <div class="ruleLabel">糾結最大擴散（%）</div>
+              <input id="tangleSpreadPct" class="ruleInput" value="1.5" />
             </div>
 
             <div class="ruleBox">
-              <div class="label">量能條件（今日量 ≥ 均量 × 倍數）</div>
-              <input id="volMultiplier" class="input" type="number" value="1.0" step="0.1" min="0" />
+              <div class="ruleLabel">量能條件（今日量 ≥ 均量 × 倍數）</div>
+              <input id="volMultiplier" class="ruleInput" value="1.0" />
             </div>
 
             <div class="ruleBox">
-              <div class="label">均量天數</div>
-              <input id="volMaDays" class="input" type="number" value="10" min="1" />
+              <div class="ruleLabel">均量天數</div>
+              <input id="volMaDays" class="ruleInput" value="10" />
             </div>
 
             <div class="ruleBox">
-              <div class="label">快取分鐘（避免一直掃描被擋）</div>
-              <input id="cacheMin" class="input" type="number" value="10" min="0" />
+              <div class="ruleLabel">快取分鐘（避免一直掃被擋）</div>
+              <input id="cacheMin" class="ruleInput" value="10" />
             </div>
           </div>
 
-          <div class="ruleSummary">
+          <!-- 中文備註：規則摘要 -->
+          <div class="summaryBox">
             <div class="summaryTitle">目前規則摘要</div>
-            <ul class="summaryList">
-              <li>找出 5/10/20 日平均線糾結後上揚，且股價站上三線的股票。</li>
-              <li>找出 5/10/20 日平均線多頭排列（短＞中＞長），且站上三線的股票。</li>
-              <li>量能：今日量 ≥ 10 日均量 × 1.0。</li>
-              <li>糾結：回看 10 天，三線最大擴散 ≤ 收盤 × 1.5%。</li>
-            </ul>
+            <ul id="ruleSummary" class="summaryList"></ul>
           </div>
-        </section>
+        </div>
 
-        <!-- 結果卡片 -->
-        <section class="card">
-          <div class="cardHead">
+        <!-- 搜尋結果卡 -->
+        <div class="card">
+          <div class="cardHeader">
             <div class="cardTitle">搜尋結果</div>
-            <div id="statusBadge" class="badge neutral">尚未搜尋</div>
+
+            <!-- 右上角狀態膠囊 -->
+            <div id="statusPill" class="pillStatus neutral">尚未搜尋</div>
           </div>
 
+          <!-- 狀態文字（例如錯誤訊息） -->
+          <div id="statusText" class="statusText muted">按上方「一鍵搜尋」開始掃描。</div>
+
+          <!-- 結果區 -->
           <div id="resultArea" class="resultArea">
-            <div class="muted">按上方「一鍵搜尋」開始。</div>
+            <div class="mutedRow">尚未搜尋</div>
           </div>
-        </section>
+        </div>
       </section>
-    </main>
-  </div>
+    </section>
+  </main>
 
   <script src="./app.js"></script>
 </body>
