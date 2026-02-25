@@ -1,11 +1,27 @@
-/* 中文備註：整體背景與字體 */
+/* 中文備註：整體主題色與基礎設定 */
 :root{
   --bg: #f4f7fb;
   --card: #ffffff;
   --line: #e6edf5;
   --text: #0f172a;
   --muted: #64748b;
-  --shadow: 0 10px 30px rgba(15,23,42,0.08);
+
+  --shadow: 0 12px 34px rgba(15,23,42,0.08);
+  --shadow2: 0 18px 45px rgba(15,23,42,0.12);
+
+  --brand1: #111827;
+  --brand2: #0b1220;
+
+  --okBg: #dcfce7;
+  --okLine: #bbf7d0;
+  --okText: #166534;
+
+  --errBg: #fee2e2;
+  --errLine: #fecaca;
+  --errText: #991b1b;
+
+  --neuBg: #f1f5f9;
+  --neuText: #334155;
 }
 
 *{ box-sizing: border-box; }
@@ -13,15 +29,14 @@
 body{
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Noto Sans TC", sans-serif;
-  background: var(--bg);
+  background: radial-gradient(1200px 500px at 50% -10%, #eef3ff 0%, var(--bg) 55%);
   color: var(--text);
 }
 
 /* =========================
-   Header：手機縮高度 + 固定頂部
+   Header：更像 App 的頂部區
    ========================= */
 
-/* 中文備註：上方標題列 */
 .topbar{
   max-width: 1080px;
   margin: 18px auto 0;
@@ -33,19 +48,18 @@ body{
   flex-direction: column;
 }
 
-/* 中文備註：手機上把 header 變成黏住，減少佔位 */
 @media (max-width: 520px){
   .topbar{
     position: sticky;
     top: 0;
     z-index: 50;
-    background: rgba(244,247,251,0.85);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--line);
-    padding: 10px 14px 12px;
+    background: rgba(244,247,251,0.86);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(230,237,245,0.85);
+    padding: 12px 14px 14px;
     margin: 0 auto;
-    gap: 10px;
+    gap: 12px;
   }
 }
 
@@ -54,69 +68,97 @@ body{
   align-items: baseline;
   gap: 10px;
 }
+
 .title{
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-}
-.ver{
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--muted);
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
 }
 
-/* 中文備註：手機縮小字體，讓首屏更乾淨 */
+.ver{
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(241,245,249,0.9);
+  border: 1px solid rgba(230,237,245,0.9);
+}
+
 @media (max-width: 520px){
   .title{ font-size: 22px; }
-  .ver{ font-size: 12px; }
+  .ver{ font-size: 12px; padding: 3px 9px; }
 }
 
-/* 中文備註：主按鈕 */
+/* =========================
+   ✅ 一鍵搜尋按鈕：更大、更像 App CTA
+   ========================= */
+
 .primaryBtn{
   border: none;
-  padding: 12px 22px;
-  border-radius: 12px;
   cursor: pointer;
   color: #fff;
-  background: linear-gradient(180deg, #1f2937, #0b1220);
-  box-shadow: 0 10px 25px rgba(15,23,42,0.18);
-  font-weight: 800;
+  background: linear-gradient(180deg, var(--brand1), var(--brand2));
+  box-shadow: var(--shadow2);
+  font-weight: 950;
+  letter-spacing: 0.3px;
+
+  /* 桌機也更大 */
+  padding: 14px 34px;
+  border-radius: 16px;
+  font-size: 15px;
+  min-height: 50px;
+
+  /* 微微立體 */
+  transform: translateY(0);
+  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
 }
 
-/* 中文備註：手機按鈕更扁一點 */
+.primaryBtn:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 22px 55px rgba(15,23,42,0.18);
+}
+
+.primaryBtn:active{
+  transform: translateY(0);
+  box-shadow: var(--shadow2);
+}
+
+/* ✅ 手機：整條大按鈕 + 更大字 */
 @media (max-width: 520px){
   .primaryBtn{
     width: 100%;
-    max-width: 360px;
-    padding: 11px 18px;
-    border-radius: 14px;
+    max-width: 420px;
+    padding: 16px 18px;
+    border-radius: 18px;
+    font-size: 16px;
+    min-height: 56px;
   }
 }
 
 .primaryBtn:disabled{
   opacity: .6;
   cursor: not-allowed;
+  transform: none;
 }
 
 /* =========================
    Layout
    ========================= */
 
-/* 中文備註：內容包裹 */
 .wrap{
   max-width: 1080px;
-  margin: 18px auto 48px;
+  margin: 18px auto 54px;
   padding: 0 18px;
 }
 
 @media (max-width: 520px){
   .wrap{
     padding: 0 14px;
-    margin: 14px auto 40px;
+    margin: 14px auto 44px;
   }
 }
 
-/* 中文備註：單欄內容 */
 .content{
   display: flex;
   flex-direction: column;
@@ -127,11 +169,14 @@ body{
   .content{ gap: 14px; }
 }
 
-/* 中文備註：卡片 */
+/* =========================
+   Card：更乾淨、更像 iOS 卡片
+   ========================= */
+
 .card{
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
+  border: 1px solid rgba(230,237,245,0.95);
+  border-radius: 18px;
   box-shadow: var(--shadow);
   padding: 16px;
 }
@@ -139,7 +184,7 @@ body{
 @media (max-width: 520px){
   .card{
     padding: 14px;
-    border-radius: 18px;
+    border-radius: 20px;
   }
 }
 
@@ -149,36 +194,35 @@ body{
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
-  flex-wrap: wrap; /* 中文備註：手機避免擠爆 */
+  flex-wrap: wrap;
 }
 
 .cardTitle{
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 950;
+  letter-spacing: 0.2px;
 }
+
 .cardHint{
   font-size: 12px;
   color: var(--muted);
-  font-weight: 700;
+  font-weight: 850;
 }
 
 /* =========================
-   規則區：手機改成一欄大卡（好讀）
+   規則：手機單欄最好改、最好看
    ========================= */
 
-/* 中文備註：6格規則區（桌機 3 欄） */
 .grid6{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
-/* 中文備註：平板 2 欄 */
 @media (max-width: 860px){
   .grid6{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* ✅ 中文備註：手機 1 欄（最乾淨、最好讀） */
 @media (max-width: 520px){
   .grid6{
     grid-template-columns: 1fr;
@@ -187,39 +231,22 @@ body{
 }
 
 .ruleBox{
-  border: 1px solid var(--line);
-  border-radius: 14px;
+  border: 1px solid rgba(230,237,245,0.95);
+  border-radius: 16px;
   padding: 12px;
-  background: #fbfdff;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
 }
 
 @media (max-width: 520px){
-  .ruleBox{
-    padding: 12px 12px;
-    border-radius: 16px;
-  }
+  .ruleBox{ padding: 12px; border-radius: 18px; }
 }
 
-/* 中文備註：標籤改成一行，避免「均線（短/中/長）」被硬拆 */
 .ruleLabel{
   font-size: 12px;
   color: var(--muted);
-  font-weight: 800;
-  margin-bottom: 8px;
+  font-weight: 900;
+  margin-bottom: 7px;
   line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 中文備註：手機上放寬一點，可換行但不會擠 */
-@media (max-width: 520px){
-  .ruleLabel{
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    margin-bottom: 6px;
-  }
 }
 
 .ruleInput{
@@ -227,12 +254,11 @@ body{
   border: 0;
   outline: none;
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 950;
   background: transparent;
   color: var(--text);
 }
 
-/* 中文備註：手機輸入數字更清楚 */
 @media (max-width: 520px){
   .ruleInput{
     font-size: 20px;
@@ -241,71 +267,72 @@ body{
 }
 
 /* =========================
-   摘要框：手機縮內距、提升可讀性
+   摘要框
    ========================= */
 
 .summaryBox{
   margin-top: 12px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
+  border: 1px solid rgba(230,237,245,0.95);
+  border-radius: 16px;
   padding: 12px;
   background: #ffffff;
 }
 
 @media (max-width: 520px){
-  .summaryBox{
-    padding: 12px;
-    border-radius: 16px;
-  }
+  .summaryBox{ border-radius: 18px; }
 }
 
 .summaryTitle{
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 950;
   margin-bottom: 8px;
 }
+
 .summaryList{
   margin: 0;
   padding-left: 18px;
   color: var(--text);
 }
+
 .summaryList li{
   margin: 6px 0;
   color: var(--text);
-  font-weight: 650;
+  font-weight: 700;
   line-height: 1.45;
 }
 
 /* =========================
-   狀態顯示：避免手機擠在同一行
+   狀態顯示
    ========================= */
 
 .pillStatus{
-  padding: 6px 10px;
+  padding: 7px 12px;
   border-radius: 999px;
-  font-weight: 900;
+  font-weight: 950;
   font-size: 12px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(230,237,245,0.95);
 }
-.pillStatus.neutral{ background: #f1f5f9; color: #334155; }
-.pillStatus.ok{ background: #dcfce7; border-color: #bbf7d0; color: #166534; }
-.pillStatus.err{ background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+
+.pillStatus.neutral{ background: var(--neuBg); color: var(--neuText); }
+.pillStatus.ok{ background: var(--okBg); border-color: var(--okLine); color: var(--okText); }
+.pillStatus.err{ background: var(--errBg); border-color: var(--errLine); color: var(--errText); }
 
 .statusText{
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 850;
   margin: 2px 0 10px;
   line-height: 1.4;
 }
+
 .statusText.muted{ color: var(--muted); }
 
 /* =========================
-   結果區 + 表格：手機好滑 + 第一欄固定
+   結果區
    ========================= */
 
 .resultArea{
-  border: 1px solid var(--line);
-  border-radius: 14px;
+  border: 1px solid rgba(230,237,245,0.95);
+  border-radius: 16px;
   padding: 12px;
   background: #ffffff;
 }
@@ -313,27 +340,24 @@ body{
 @media (max-width: 520px){
   .resultArea{
     padding: 10px;
-    border-radius: 16px;
+    border-radius: 18px;
   }
 }
 
 .mutedRow{
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 850;
 }
 
-/* 中文備註：表格 */
+/* =========================
+   表格：手機好滑 + 第一欄固定
+   ========================= */
+
 .tableWrap{
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-}
-
-/* 中文備註：手機上給一點滑動提示感 */
-@media (max-width: 520px){
-  .tableWrap{
-    border-radius: 14px;
-  }
+  border-radius: 14px;
 }
 
 table{
@@ -345,37 +369,34 @@ table{
 th, td{
   text-align: left;
   padding: 10px 10px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(230,237,245,0.95);
   font-size: 13px;
   font-weight: 750;
-  white-space: nowrap; /* 中文備註：避免表格亂換行變高 */
+  white-space: nowrap;
 }
 
 th{
   color: #334155;
-  font-weight: 900;
+  font-weight: 950;
   background: #fbfdff;
   position: sticky;
-  top: 0; /* 中文備註：表頭固定 */
+  top: 0;
   z-index: 2;
 }
-td{
-  color: #0f172a;
-}
 
-/* ✅ 中文備註：第一欄（代碼）固定，手機滑表格不會迷路 */
+td{ color: #0f172a; }
+
+/* 中文備註：第一欄固定 */
 table th:first-child,
 table td:first-child{
   position: sticky;
   left: 0;
   background: #ffffff;
   z-index: 3;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid rgba(230,237,245,0.95);
 }
 
-table th:first-child{
-  background: #fbfdff;
-}
+table th:first-child{ background: #fbfdff; }
 
 /* 中文備註：代碼膠囊 */
 .codePill{
@@ -384,5 +405,5 @@ table th:first-child{
   border-radius: 999px;
   background: #eef2ff;
   border: 1px solid #dbeafe;
-  font-weight: 900;
+  font-weight: 950;
 }
