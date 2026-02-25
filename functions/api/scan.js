@@ -1,8 +1,7 @@
 // functions/api/scan.js
 // 中文備註：Cloudflare Pages Function：/api/scan
-// 功能：抓 Yahoo Finance 日線資料 → 計算均線/量比 → 依規則篩選 → 回傳給前端表格
-// 進階：股票池 Top 500（自動抓名單），名稱強制繁中（TWSE 即時 API）
-// 注意：外部來源可能偶爾擋請求，所以全程都有 fallback，避免整個流程掛掉
+// 功能：抓 Yahoo 日線 → 計算均線/量能 → 三線合一（進階）篩選 → 回傳前端
+// 重點：使用 Rolling SMA（O(n)）避免 Top500 卡死
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,7 +10,7 @@ const corsHeaders = {
   "Content-Type": "application/json; charset=utf-8",
 };
 
-// 中文備註：回 JSON 的小工具
+// 中文備註：回 JSON 工具
 function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -25,119 +24,32 @@ function toNumber(v, defVal) {
   return Number.isFinite(n) ? n : defVal;
 }
 
-// ======================
-// 0) Top 500 股票池（自動抓名單）
-// ======================
-
-// 中文備註：抓名單失敗時的保底股票池（至少可跑）
-const FALLBACK_CODES = [
-  "2330","2317","2454","2308","2412","2881","2882","2884","2886","2891",
-  "1301","1303","2002","2603","2609","2615","3034","2303","3711","2382",
+// 中文備註：股票池（V1：Top500 由你前端選，這邊先放預設示範，實務你會改成讀 Top500 清單）
+// 先放少量避免你測試時爆量；你已經有 Top500 版本就把這邊替換成你的 Top500 清單即可
+const UNIVERSE_CODES = [
+  "2330", "2317", "2454", "2308", "2412",
+  "2881", "2882", "2884", "2886", "2891",
+  "1301", "1303", "2002", "2603", "2609",
+  "2615", "3034", "2303", "3711", "2382",
 ];
 
-// 中文備註：嘗試抓上市公司名單（openapi.twse.com.tw）
-// 來源可能會變動或偶爾擋，所以要 try/catch + fallback
-async function fetchTWSEList() {
-  // 中文備註：常見的上市公司基本資料 JSON（若來源偶發失效，會 fallback）
-  const url = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L";
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
-  if (!res.ok) throw new Error("TWSE list HTTP " + res.status);
-  const data = await res.json();
-
-  // 中文備註：期望欄位：公司代號/公司名稱（不同版本欄位名可能不同，所以做多路徑容錯）
-  const out = [];
-  for (const r of (Array.isArray(data) ? data : [])) {
-    const code = (r["公司代號"] || r["公司代號\n"] || r["CompanyCode"] || r["SecuritiesCompanyCode"] || "").toString().trim();
-    const name = (r["公司名稱"] || r["公司名稱\n"] || r["CompanyName"] || r["SecuritiesCompanyName"] || "").toString().trim();
-    if (!/^\d{4}$/.test(code)) continue;
-    out.push({ code, market: "TWSE", name: name || "" });
-  }
-  return out;
+// 中文備註：把 2330 轉成 Yahoo symbol（先試 .TW，失敗再試 .TWO）
+function buildSymbols(code) {
+  return [`${code}.TW`, `${code}.TWO`];
 }
 
-// 中文備註：嘗試抓上櫃公司名單（tpex.org.tw openapi）
-// 同樣做容錯，抓不到就回空
-async function fetchTPEXList() {
-  // 中文備註：此 openapi 來源可能不同站點/路徑版本，若失效會 fallback
-  const url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O";
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
-  if (!res.ok) throw new Error("TPEX list HTTP " + res.status);
-  const data = await res.json();
-
-  const out = [];
-  for (const r of (Array.isArray(data) ? data : [])) {
-    const code = (r["公司代號"] || r["CompanyCode"] || "").toString().trim();
-    const name = (r["公司名稱"] || r["CompanyName"] || "").toString().trim();
-    if (!/^\d{4}$/.test(code)) continue;
-    out.push({ code, market: "TPEX", name: name || "" });
-  }
-  return out;
-}
-
-// 中文備註：Top 500 名單快取（每天更新一次）
-async function getTop500Universe() {
-  const today = new Date().toISOString().slice(0, 10);
-  const cacheKey = "https://cache.local/universe?day=" + today;
-  const cache = caches.default;
-
-  // 中文備註：先吃快取
-  const hit = await cache.match(cacheKey);
-  if (hit) {
-    const txt = await hit.text();
-    const obj = JSON.parse(txt);
-    if (Array.isArray(obj?.list) && obj.list.length > 0) return obj.list;
-  }
-
-  // 中文備註：嘗試抓名單（上市 + 上櫃）
-  let list = [];
-  try {
-    const [twse, tpex] = await Promise.allSettled([fetchTWSEList(), fetchTPEXList()]);
-    const a = (twse.status === "fulfilled") ? twse.value : [];
-    const b = (tpex.status === "fulfilled") ? tpex.value : [];
-    list = [...a, ...b];
-
-    // 中文備註：去重（同 code 只留第一個）
-    const seen = new Set();
-    list = list.filter(x => {
-      if (seen.has(x.code)) return false;
-      seen.add(x.code);
-      return true;
-    });
-
-    // 中文備註：Top 500（這裡採「名單順序」取前 500，避免排序依賴額外資料）
-    list = list.slice(0, 500);
-
-    // 中文備註：快取保存
-    const payload = { day: today, list };
-    const res = new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
-    await cache.put(cacheKey, res);
-    return list.length ? list : FALLBACK_CODES.map(code => ({ code, market: "TWSE", name: "" }));
-  } catch {
-    // 中文備註：整段抓名單失敗就 fallback
-    return FALLBACK_CODES.map(code => ({ code, market: "TWSE", name: "" }));
-  }
-}
-
-// 中文備註：依市場轉 Yahoo symbol（上市 .TW，上櫃 .TWO）
-function toYahooSymbol(code, market) {
-  return market === "TPEX" ? `${code}.TWO` : `${code}.TW`;
-}
-
-// ======================
-// 1) Yahoo 日線資料
-// ======================
-
-// 中文備註：抓 Yahoo 日線（chart API）
-// range 用 6mo：資料較小、速度較快，但仍足夠計算 20MA + lookback
+// 中文備註：抓 Yahoo chart（日線）
 async function fetchYahooChart(symbol) {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?range=6mo&interval=1d&includePrePost=false`;
+    `?range=1y&interval=1d&includePrePost=false`;
 
   const res = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0",
       "Accept": "application/json",
+      // 中文備註：這個很重要，很多台股名稱會因語系回傳英文，強制偏向 zh-TW
+      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     },
   });
 
@@ -162,127 +74,93 @@ async function fetchYahooChart(symbol) {
     rows.push({ t: ts[i], close: Number(c), volume: Number(v) });
   }
 
-  if (rows.length < 60) throw new Error("not enough data");
+  if (rows.length < 80) throw new Error("not enough data");
   return rows;
 }
 
-// ======================
-// 2) 名稱繁中：TWSE 即時 API（批次）
-// ======================
-
-// 中文備註：TWSE 即時資料 API，可回傳中文名稱（一次可帶多檔，用 | 分隔）
-// 注意：這是「即時」介面，偶爾會擋或限速，所以拿不到就回空 map（不影響主流程）
-async function fetchTWSEChineseNamesBatch(pairs) {
-  // pairs: [{code, market}]
-  // ex_ch 格式：tse_2330.tw | otc_6488.tw
-  const exCh = pairs.map(x => {
-    const prefix = (x.market === "TPEX") ? "otc" : "tse";
-    return `${prefix}_${x.code}.tw`;
-  }).join("|");
-
-  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${encodeURIComponent(exCh)}&json=1&delay=0`;
+// 中文備註：批次抓名稱（Yahoo quote）
+// 注意：加 Accept-Language，盡量拿到繁中名稱
+async function fetchYahooNames(symbols) {
+  const url =
+    `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}`;
 
   const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "application/json",
+      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    },
   });
+
   if (!res.ok) return new Map();
+  const data = await res.json();
+  const list = data?.quoteResponse?.result || [];
 
-  const data = await res.json().catch(() => null);
-  const list = data?.msgArray || [];
   const map = new Map();
-
   for (const it of list) {
-    const code = (it?.c || "").toString().trim();
-    const name = (it?.n || it?.nf || "").toString().trim();
-    if (/^\d{4}$/.test(code) && name) map.set(code, name);
+    if (!it?.symbol) continue;
+    // 中文備註：優先取 Yahoo 給的中文名；沒有就退回 code
+    const name = it.longName || it.shortName || "";
+    map.set(it.symbol, name);
   }
   return map;
 }
 
-// 中文備註：把 Top 500 的中文名稱補齊（分批，避免 URL 太長）
-async function fillChineseNames(universe) {
-  const nameMap = new Map();
-  const chunkSize = 50;
+// 中文備註：Rolling SMA（O(n)）
+// 回傳陣列：同長度，算不出來的位置為 null
+function rollingSMA(values, window) {
+  const n = values.length;
+  const out = new Array(n).fill(null);
+  if (window <= 0) return out;
+  let sum = 0;
 
-  for (let i = 0; i < universe.length; i += chunkSize) {
-    const chunk = universe.slice(i, i + chunkSize);
-    try {
-      const m = await fetchTWSEChineseNamesBatch(chunk);
-      for (const [k, v] of m.entries()) nameMap.set(k, v);
-    } catch {
-      // 中文備註：單批失敗就跳過，不中斷
-    }
+  for (let i = 0; i < n; i++) {
+    sum += values[i];
+    if (i >= window) sum -= values[i - window];
+    if (i >= window - 1) out[i] = sum / window;
   }
-  return nameMap;
+  return out;
 }
 
-// ======================
-// 3) 技術指標：SMA / 均量 / 糾結判斷
-// ======================
-
-function sma(values, window) {
-  if (values.length < window) return null;
-  let sum = 0;
-  for (let i = values.length - window; i < values.length; i++) sum += values[i];
-  return sum / window;
+// 中文備註：Rolling AVG（均量）同 SMA
+function rollingAVG(values, window) {
+  return rollingSMA(values, window);
 }
 
-function avg(values, window) {
-  if (values.length < window) return null;
-  let sum = 0;
-  for (let i = values.length - window; i < values.length; i++) sum += values[i];
-  return sum / window;
-}
-
-// 中文備註：判斷「三線糾結」：最近 lookback 天內，三條均線的最大擴散 <= 閾值
-function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
+// 中文備註：判斷糾結：最近 lookback 天，三線擴散 <= maxSpreadPct
+function isTangledBySeries(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
   const n = closes.length;
   const start = Math.max(0, n - lookbackDays);
 
   for (let i = start; i < n; i++) {
-    const slice = closes.slice(0, i + 1);
-    const s = sma(slice, maS);
-    const m = sma(slice, maM);
-    const l = sma(slice, maL);
+    const s = maS[i], m = maM[i], l = maL[i];
+    const c = closes[i];
+
     if (s == null || m == null || l == null) return false;
+    if (!c || c <= 0) return false;
 
     const mx = Math.max(s, m, l);
     const mn = Math.min(s, m, l);
-    const c = closes[i] || 0;
-    if (c <= 0) return false;
-
-    const spread = (mx - mn) / c;
+    const spread = (mx - mn) / c; // 以收盤當分母
     if (spread > maxSpreadPct) return false;
   }
   return true;
 }
 
-// ======================
-// 4) 併發限制（避免 500 檔同時打爆/超時）
-// ======================
+// 中文備註：判斷均線轉強（避免只是剛好站上）
+// slopeDays=3：MA長(今天) > MA長(3天前)
+function isTurningUp(maLongSeries, slopeDays) {
+  const n = maLongSeries.length;
+  const i0 = n - 1;
+  const i1 = n - 1 - Math.max(1, slopeDays);
 
-async function mapLimit(list, limit, mapper) {
-  const ret = [];
-  let idx = 0;
+  if (i1 < 0) return false;
+  const a = maLongSeries[i0];
+  const b = maLongSeries[i1];
+  if (a == null || b == null) return false;
 
-  const workers = Array.from({ length: limit }).map(async () => {
-    while (idx < list.length) {
-      const cur = idx++;
-      try {
-        ret[cur] = await mapper(list[cur], cur);
-      } catch (e) {
-        ret[cur] = null;
-      }
-    }
-  });
-
-  await Promise.all(workers);
-  return ret;
+  return a > b;
 }
-
-// ======================
-// 5) 主入口
-// ======================
 
 export async function onRequest(context) {
   const { request } = context;
@@ -305,26 +183,32 @@ export async function onRequest(context) {
     const body = await request.json();
     const rules = body?.rules || {};
 
-    // 中文備註：讀規則（跟 app.js 的 rules 欄位一致）
-    const ma_short = toNumber(rules.ma_short, 5);
-    const ma_mid = toNumber(rules.ma_mid, 10);
-    const ma_long = toNumber(rules.ma_long, 20);
+    // 中文備註：讀規則（維持你前端欄位）
+    const ma_short = Math.floor(toNumber(rules.ma_short, 5));
+    const ma_mid = Math.floor(toNumber(rules.ma_mid, 10));
+    const ma_long = Math.floor(toNumber(rules.ma_long, 20));
 
-    const tangle_lookback_days = toNumber(rules.tangle_lookback_days, 5);
-    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.05); // 已經是小數（5% = 0.05）
+    const tangle_lookback_days = Math.floor(toNumber(rules.tangle_lookback_days, 5));
+    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.05); // 5% = 0.05
 
-    const volume_multiplier = toNumber(rules.volume_multiplier, 0.5);
-    const volume_ma_days = toNumber(rules.volume_ma_days, 10);
+    const volume_multiplier = toNumber(rules.volume_multiplier, 0.8);
+    const volume_ma_days = Math.floor(toNumber(rules.volume_ma_days, 60));
 
-    const cache_ttl_seconds = Math.max(0, toNumber(rules.cache_ttl_seconds, 600));
+    const cache_ttl_seconds = Math.max(0, Math.floor(toNumber(rules.cache_ttl_seconds, 600)));
 
-    // 中文備註：快取 key（同一組規則在 TTL 內就直接回）
+    // ✅ 新增（進階）：均線轉強、避免追高（先給預設，不破壞你前端）
+    const slope_days = Math.floor(toNumber(rules.slope_days, 3));               // MA長轉強確認
+    const max_extension_pct = toNumber(rules.max_extension_pct, 0.12);          // 與MA長乖離上限（12%）
+
+    // 中文備註：快取 key（同規則 + 當日）
     const cacheKeyObj = {
       ma_short, ma_mid, ma_long,
       tangle_lookback_days,
       tangle_max_spread_pct,
       volume_multiplier,
       volume_ma_days,
+      slope_days,
+      max_extension_pct,
       day: new Date().toISOString().slice(0, 10),
     };
     const cacheKey = "https://cache.local/scan?" + encodeURIComponent(JSON.stringify(cacheKeyObj));
@@ -338,58 +222,78 @@ export async function onRequest(context) {
       }
     }
 
-    // ✅ 中文備註：Top 500 股票池
-    const universe = await getTop500Universe();
+    const items = [];
+    const resolvedSymbols = [];
 
-    // ✅ 中文備註：先補齊繁中名稱（盡量抓，抓不到也不影響掃描）
-    const chineseNameMap = await fillChineseNames(universe);
+    for (const code of UNIVERSE_CODES) {
+      const candidates = buildSymbols(code);
 
-    // 中文備註：開始掃描（併發限制：同時 10 檔，穩定且較不易被擋）
-    const results = await mapLimit(universe, 10, async (u) => {
-      const code = u.code;
-      const market = u.market;
-      const symbol = toYahooSymbol(code, market);
+      let rows = null;
+      let usedSymbol = null;
 
-      // 1) Yahoo 日線
-      const rows = await fetchYahooChart(symbol);
+      for (const sym of candidates) {
+        try {
+          rows = await fetchYahooChart(sym);
+          usedSymbol = sym;
+          break;
+        } catch {
+          // 中文備註：這個 symbol 失敗就試下一個
+        }
+      }
+
+      if (!rows || !usedSymbol) continue;
 
       const closes = rows.map(r => r.close);
       const vols = rows.map(r => r.volume);
 
-      // 今日數據
       const close = closes[closes.length - 1];
       const volume = vols[vols.length - 1];
 
-      // 今日三條 MA
-      const maS = sma(closes, ma_short);
-      const maM = sma(closes, ma_mid);
-      const maL = sma(closes, ma_long);
-      if (maS == null || maM == null || maL == null) return null;
+      // 中文備註：先建 SMA series（O(n)）
+      const maS_series = rollingSMA(closes, ma_short);
+      const maM_series = rollingSMA(closes, ma_mid);
+      const maL_series = rollingSMA(closes, ma_long);
+      const vma_series = rollingAVG(vols, volume_ma_days);
 
-      // 均量 + 量比
-      const vma = avg(vols, volume_ma_days);
-      if (vma == null || vma <= 0) return null;
+      const maS = maS_series[maS_series.length - 1];
+      const maM = maM_series[maM_series.length - 1];
+      const maL = maL_series[maL_series.length - 1];
+      const vma = vma_series[vma_series.length - 1];
+
+      if (maS == null || maM == null || maL == null) continue;
+      if (vma == null || vma <= 0) continue;
+
       const vol_ratio = volume / vma;
 
-      // 篩選條件
-      const tangled = isTangled(closes, ma_short, ma_mid, ma_long, tangle_lookback_days, tangle_max_spread_pct);
-      if (!tangled) return null;
+      // 1) 糾結
+      const tangled = isTangledBySeries(
+        closes, maS_series, maM_series, maL_series,
+        tangle_lookback_days,
+        tangle_max_spread_pct
+      );
+      if (!tangled) continue;
 
-      // 均線多頭排列（短 > 中 > 長）
-      if (!(maS > maM && maM > maL)) return null;
+      // 2) 多頭排列
+      if (!(maS > maM && maM > maL)) continue;
 
-      // 收盤站上三線
-      if (!(close >= maS && close >= maM && close >= maL)) return null;
+      // 3) 收盤站上三線
+      if (!(close >= maS && close >= maM && close >= maL)) continue;
 
-      // 量能條件
-      if (!(vol_ratio >= volume_multiplier)) return null;
+      // 4) 量能條件
+      if (!(vol_ratio >= volume_multiplier)) continue;
 
-      // ✅ 名稱優先用「繁中名稱」，沒有就用名單內 name，再沒有就 code
-      const zhName = chineseNameMap.get(code) || u.name || code;
+      // ✅ 5) 新增：MA長轉強（避免只是剛好站上）
+      if (!isTurningUp(maL_series, slope_days)) continue;
 
-      return {
+      // ✅ 6) 新增：避免追高乖離太大（close 不要離 MA長太遠）
+      // (close - maL) / maL <= max_extension_pct
+      const extension = (close - maL) / maL;
+      if (extension > max_extension_pct) continue;
+
+      items.push({
         code,
-        name: zhName,
+        symbol: usedSymbol,
+        name: "",
         close,
         ma_short: maS,
         ma_mid: maM,
@@ -397,11 +301,19 @@ export async function onRequest(context) {
         volume,
         vma,
         vol_ratio,
-      };
-    });
+      });
 
-    // 中文備註：過濾 null
-    const items = results.filter(Boolean);
+      resolvedSymbols.push(usedSymbol);
+    }
+
+    // 中文備註：批次補名稱（盡量拿繁中）
+    const nameMap = resolvedSymbols.length ? await fetchYahooNames(resolvedSymbols) : new Map();
+    for (const it of items) {
+      const nm = nameMap.get(it.symbol) || "";
+      // 中文備註：如果 Yahoo 還是吐英文，就先用代碼（避免 UI 很醜）
+      it.name = nm ? nm : it.code;
+      delete it.symbol;
+    }
 
     // 中文備註：排序（量比由大到小）
     items.sort((a, b) => (b.vol_ratio || 0) - (a.vol_ratio || 0));
