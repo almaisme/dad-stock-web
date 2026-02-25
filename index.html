@@ -3,22 +3,98 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>爸爸股票分析</title>
+  <title>爸爸用看盤台</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>📈 爸爸股票分析</h1>
-
-    <div class="search-box">
-      <input type="text" id="stockInput" placeholder="輸入股號 (例如 2330)" />
-      <button onclick="searchStock()">查詢</button>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <div class="brand">
+        <div class="brand__title">爸爸用看盤台</div>
+        <div class="brand__sub">輸入代號，一鍵開資料＋三線合一判斷</div>
+      </div>
     </div>
+  </header>
 
-    <div class="quick-list" id="quickList"></div>
+  <main class="container">
+    <!-- 查詢卡 -->
+    <section class="card">
+      <div class="card__header">
+        <div class="card__title">股票代號 / 名稱</div>
+        <div class="card__sub" id="hintText">例：2330、0050、日勝生</div>
+      </div>
 
-    <div id="result" class="result"></div>
-  </div>
+      <div class="search">
+        <input id="stockInput" class="search__input" type="text" placeholder="輸入代號（建議先用代號）" />
+        <button id="searchBtn" class="search__btn">查詢</button>
+      </div>
+
+      <div class="sources">
+        <button class="chip" data-src="yahoo">Yahoo 股市</button>
+        <button class="chip" data-src="goodinfo">Goodinfo</button>
+        <button class="chip" data-src="cmoney">CMoney</button>
+        <button class="chip" data-src="twse">證交所</button>
+        <div class="sources__note">小提醒：先用「代號」最準；若輸入名稱，會改用搜尋頁。</div>
+      </div>
+    </section>
+
+    <!-- 常看清單 -->
+    <section class="card">
+      <div class="card__header row-between">
+        <div>
+          <div class="card__title">爸爸常看（自動記住）</div>
+          <div class="card__sub">點一下就查；你查過的代號也會自動加入</div>
+        </div>
+        <button id="clearFavBtn" class="btn-ghost" title="清空常看">清空</button>
+      </div>
+
+      <div id="favList" class="fav"></div>
+
+      <div class="fav__adder">
+        <input id="favAddInput" class="fav__input" type="text" placeholder="手動加一檔：輸入代號（例如 2330）" />
+        <button id="favAddBtn" class="fav__btn">加入</button>
+      </div>
+    </section>
+
+    <!-- 看盤規則 -->
+    <section class="card">
+      <div class="card__header">
+        <div class="card__title">固定看盤順序（爸爸版）</div>
+      </div>
+
+      <ol class="rules">
+        <li>看大盤方向：今天偏多 / 偏空 / 盤整？（先不要逆勢）</li>
+        <li>看量：成交量有沒有放大？是不是假突破？</li>
+        <li>看均線：5/10/20 日線有沒有糾結 → 翻多排列？</li>
+        <li>看關鍵價位：前高、缺口、支撐壓力、整數關卡</li>
+        <li>設定停損停利：先想好再進（不要進了才想）</li>
+        <li>分批：不追高、不梭哈、照紀律做</li>
+      </ol>
+
+      <div class="note">
+        <div class="note__title">你的紀律（快速版）</div>
+        <ul>
+          <li>單筆最大虧損 ≤ 總資金 5%</li>
+          <li>進場前設定停利/停損，成交後不亂改</li>
+          <li>不追高、不報復交易、不因連勝提高風險</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 結果 -->
+    <section class="card">
+      <div class="card__header">
+        <div class="card__title">結果</div>
+        <div class="card__sub" id="statusText">尚未查詢</div>
+      </div>
+
+      <div id="result" class="result"></div>
+    </section>
+
+    <footer class="footer">
+      版本：MVP v1 — 先能用，再變強
+    </footer>
+  </main>
 
   <script src="app.js"></script>
 </body>
