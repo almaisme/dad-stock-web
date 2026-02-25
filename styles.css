@@ -1,244 +1,259 @@
 /* styles.css */
-/* 中文備註：做出截圖那種「白底卡片、左側規則欄、上面大按鈕」的 UI */
+/* 中文備註：整體風格，做出你截圖那種「乾淨白卡＋大圓角＋淡陰影」 */
 
 :root{
-  --bg:#f3f6fb;
+  --bg:#f4f7fb;
   --card:#ffffff;
   --text:#0f172a;
   --muted:#64748b;
-  --line:#e5eaf2;
-  --shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
-  --primary:#0f172a;
-  --danger:#ef4444;
-  --ok:#22c55e;
+  --line:#e6edf5;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --radius:18px;
+
+  --btn:#0f172a;
+  --btnText:#fff;
+
+  --okBg:#eafff3;
+  --okText:#0f7a3a;
+
+  --errBg:#ffecec;
+  --errText:#b42318;
+
+  --neutralBg:#eef2ff;
+  --neutralText:#334155;
 }
 
-*{ box-sizing:border-box; }
+*{ box-sizing: border-box; }
 body{
   margin:0;
-  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,"Noto Sans TC","PingFang TC","Heiti TC",sans-serif;
-  background:var(--bg);
-  color:var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
 }
 
-.wrap{
-  max-width: 980px;
-  margin: 26px auto;
-  padding: 0 16px 40px;
-}
-
-/* 頂部 */
-.hero{
+/* 頁首 */
+.topbar{
   display:flex;
   flex-direction:column;
   align-items:center;
-  gap:14px;
-  margin-bottom: 18px;
+  gap:12px;
+  padding:30px 16px 18px;
 }
-
-.heroTitle{
-  font-weight: 900;
-  font-size: 26px;
-  letter-spacing: .5px;
+.topTitle{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
 }
-
+.title{
+  font-weight:800;
+  font-size:22px;
+}
 .ver{
-  font-size: 16px;
-  font-weight: 900;
-  margin-left: 6px;
+  font-weight:700;
+  font-size:14px;
+  color: var(--muted);
 }
-
-.scanBtn{
-  background: linear-gradient(180deg, #111827, #0b1220);
-  color:#fff;
+.primaryBtn{
   border:0;
-  border-radius: 14px;
-  padding: 12px 28px;
-  font-weight: 900;
+  background: var(--btn);
+  color: var(--btnText);
+  padding:10px 18px;
+  border-radius:12px;
   cursor:pointer;
-  box-shadow: 0 10px 18px rgba(17,24,39,.18);
+  box-shadow: 0 10px 20px rgba(15,23,42,0.15);
 }
-.scanBtn:disabled{
+.primaryBtn:disabled{
   opacity:.6;
   cursor:not-allowed;
 }
 
-/* 版面：左欄 + 右欄 */
+/* 主容器 */
+.wrap{
+  width:min(1100px, calc(100% - 32px));
+  margin:0 auto 60px;
+}
 .layout{
   display:grid;
-  grid-template-columns: 90px 1fr;
-  gap: 14px;
-  align-items: start;
+  grid-template-columns: 72px 1fr;
+  gap:18px;
+  align-items:stretch;
 }
 
-/* 左側：規則欄 */
-.sideBar{
+/* 左側直條 */
+.sideTag{
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  min-height: 520px;
+  border:1px solid var(--line);
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
   display:flex;
   align-items:center;
   justify-content:center;
 }
-.sideBarText{
+.sideText{
   writing-mode: vertical-rl;
-  font-weight: 900;
-  letter-spacing: 4px;
-  color: #1f2937;
+  text-orientation: upright;
+  letter-spacing: 6px;
+  font-weight:800;
+  color: #111827;
 }
 
 /* 右側內容 */
 .content{
   display:flex;
   flex-direction:column;
-  gap: 16px;
+  gap:18px;
 }
 
+/* 卡片 */
 .card{
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 18px;
+  border:1px solid var(--line);
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 16px;
+  padding:18px;
 }
-
-.cardHead{
+.cardHeader{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap:12px;
+  margin-bottom:12px;
 }
-
 .cardTitle{
-  font-weight: 900;
-  font-size: 16px;
+  font-weight:900;
+  font-size:16px;
 }
-
-.dataSource{
+.cardHint{
+  font-size:12px;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
 }
 
-/* 規則輸入格 */
-.ruleGrid{
+/* 規則 6 格 */
+.grid6{
   display:grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  gap:12px;
 }
-
 .ruleBox{
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 12px;
-  background: #fbfdff;
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
 }
-
-.label{
+.ruleLabel{
+  font-size:12px;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-  margin-bottom: 8px;
+  margin-bottom:8px;
+  font-weight:700;
+}
+.ruleInput{
+  width:100%;
+  border:0;
+  outline:none;
+  font-size:16px;
+  font-weight:900;
+  color:#0f172a;
 }
 
-.input{
-  width: 100%;
-  border: 0;
-  outline: none;
-  background: transparent;
-  font-size: 16px;
-  font-weight: 900;
-  color: var(--text);
+/* 規則摘要 */
+.summaryBox{
+  margin-top:12px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
 }
-
-.ruleSummary{
-  margin-top: 12px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 12px;
-  background: #ffffff;
-}
-
 .summaryTitle{
-  font-weight: 900;
-  font-size: 13px;
-  margin-bottom: 8px;
+  font-size:13px;
+  font-weight:900;
+  margin-bottom:6px;
 }
-
 .summaryList{
   margin:0;
-  padding-left: 18px;
-  color: #1f2937;
-  font-size: 13px;
-  line-height: 1.8;
+  padding-left:18px;
+  color:#0f172a;
+}
+.summaryList li{
+  margin:6px 0;
+  font-size:13px;
+  color:#0f172a;
 }
 
-/* 狀態 badge */
-.badge{
-  font-size: 12px;
-  font-weight: 900;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
+/* 狀態 */
+.statusText{
+  font-size:13px;
+  margin-bottom:10px;
 }
-.badge.neutral{ color: var(--muted); background:#f8fafc; }
-.badge.ok{ color:#065f46; background:#ecfdf5; border-color:#bbf7d0; }
-.badge.bad{ color:#7f1d1d; background:#fef2f2; border-color:#fecaca; }
-
-/* 結果區 */
-.resultArea{
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 12px;
-  background: #ffffff;
-  min-height: 220px;
-}
-
-.muted{
+.muted{ color: var(--muted); }
+.mutedRow{
   color: var(--muted);
-  font-weight: 700;
-  font-size: 13px;
+  padding:10px;
+}
+
+/* 右上角狀態膠囊 */
+.pillStatus{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:800;
+  border:1px solid var(--line);
+}
+.pillStatus.ok{
+  background: var(--okBg);
+  color: var(--okText);
+}
+.pillStatus.err{
+  background: var(--errBg);
+  color: var(--errText);
+}
+.pillStatus.neutral{
+  background: var(--neutralBg);
+  color: var(--neutralText);
 }
 
 /* 表格 */
-.scroll{
+.resultArea{
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:hidden;
+}
+.tableWrap{
   overflow:auto;
 }
 table{
   width:100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 820px;
 }
-th, td{
-  padding: 10px 10px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-th{
-  color: var(--muted);
-  font-size: 12px;
+thead th{
   text-align:left;
-  background:#fbfdff;
-  position: sticky;
-  top: 0;
+  font-size:12px;
+  color: var(--muted);
+  padding:10px 12px;
+  background:#f8fafc;
+  border-bottom:1px solid var(--line);
+  white-space:nowrap;
 }
-.num{ text-align:right; }
-
-.pill{
-  display:inline-block;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-weight: 900;
+tbody td{
+  padding:12px;
+  border-bottom:1px solid var(--line);
+  font-size:13px;
+  white-space:nowrap;
+}
+.codePill{
+  display:inline-flex;
+  align-items:center;
+  padding:4px 10px;
+  border-radius:999px;
+  background:#eef2ff;
+  border:1px solid #dbeafe;
+  font-weight:900;
 }
 
 /* RWD */
-@media (max-width: 880px){
+@media (max-width: 920px){
+  .grid6{ grid-template-columns: repeat(2, 1fr); }
   .layout{ grid-template-columns: 1fr; }
-  .sideBar{ min-height: 64px; }
-  .sideBarText{ writing-mode: horizontal-tb; letter-spacing: 2px; }
-  .ruleGrid{ grid-template-columns: 1fr; }
+  .sideTag{ display:none; }
 }
