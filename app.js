@@ -20,15 +20,18 @@ function getRulesFromUI() {
 
   // 中文備註：糾結參數（% 轉成小數）
   const tangle_lookback_days = toNumber(document.getElementById("tangleLookback")?.value, 5);
-  const tangle_max_spread_pct = toNumber(document.getElementById("tangleSpreadPct")?.value, 5) / 100.0;
+  const tangle_max_spread_pct = toNumber(document.getElementById("tangleSpreadPct")?.value, 3.0) / 100.0;
 
   // 中文備註：量能參數
-  const volume_multiplier = toNumber(document.getElementById("volMultiplier")?.value, 0.5);
+  const volume_multiplier = toNumber(document.getElementById("volMultiplier")?.value, 0.8);
   const volume_ma_days = toNumber(document.getElementById("volMaDays")?.value, 10);
 
   // 中文備註：快取（分鐘 → 秒）
-  const cacheMin = toNumber(document.getElementById("cacheMin")?.value, 10);
+  const cacheMin = toNumber(document.getElementById("cacheMin")?.value, 20);
   const cache_ttl_seconds = Math.max(0, Math.floor(cacheMin * 60));
+
+  // 中文備註：股票池 Top N
+  const poolSize = toNumber(document.getElementById("poolSize")?.value, 500);
 
   return {
     ma_short, ma_mid, ma_long,
@@ -37,19 +40,19 @@ function getRulesFromUI() {
     volume_multiplier,
     volume_ma_days,
     cache_ttl_seconds,
+    pool_size: poolSize,
   };
 }
 
 function renderRuleSummary(rules) {
-  // 中文備註：把目前規則變成人看得懂的摘要
   const ul = document.getElementById("ruleSummary");
   if (!ul) return;
 
   ul.innerHTML = `
+    <li>股票池：Top ${rules.pool_size}（V1 先做穩、速度快）</li>
     <li>找出 ${rules.ma_short}/${rules.ma_mid}/${rules.ma_long} 日均線「糾結」後，且股價站上三線的股票。</li>
     <li>糾結：回看 ${rules.tangle_lookback_days} 天，三線最大擴散 ≤ ${(rules.tangle_max_spread_pct * 100).toFixed(2)}%。</li>
     <li>量能：今日量 ≥ ${rules.volume_ma_days} 日均量 × ${rules.volume_multiplier.toFixed(2)}。</li>
-    <li>股票池：Top 500（自動抓名單，避免一次掃全市場超時）。</li>
     <li>快取：${Math.round(rules.cache_ttl_seconds / 60)} 分鐘（避免一直掃被擋/變慢）。</li>
   `;
 }
@@ -69,7 +72,7 @@ function renderTable(items) {
   const rows = items.map(x => `
     <tr>
       <td><span class="codePill">${x.code}</span></td>
-      <td>${x.name || x.code || "-"}</td>
+      <td>${x.name || x.code}</td>
       <td>${fmt(x.close, 2)}</td>
       <td>${fmt(x.ma_short, 2)}</td>
       <td>${fmt(x.ma_mid, 2)}</td>
@@ -86,7 +89,7 @@ function renderTable(items) {
         <thead>
           <tr>
             <th>代碼</th>
-            <th>名稱</th>
+            <th>名稱（繁中）</th>
             <th>收盤</th>
             <th>MA短</th>
             <th>MA中</th>
@@ -112,12 +115,11 @@ async function scan() {
 
   btn.disabled = true;
   setPill("neutral", "掃描中…");
-  statusText.textContent = "掃描中，請稍等…";
+  statusText.textContent = "掃描中，請稍等…（Top 500 大概比較穩）";
   statusText.className = "statusText muted";
   resultArea.innerHTML = `<div class="mutedRow">掃描中，請稍等…</div>`;
 
   try {
-    // ✅ 關鍵：用同網域相對路徑，避免 https -> http 被擋
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -125,10 +127,7 @@ async function scan() {
     });
 
     const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(data?.error || `HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
 
     const count = Number(data.count ?? 0);
     const cached = data.cached ? "（快取）" : "";
@@ -149,12 +148,10 @@ async function scan() {
   }
 }
 
-// 中文備註：初始化時先把規則摘要渲染出來
+// 中文備註：初始化先渲染摘要
 (function init() {
-  try {
-    renderRuleSummary(getRulesFromUI());
-  } catch {}
+  try { renderRuleSummary(getRulesFromUI()); } catch {}
 })();
 
-// 中文備註：把 scan 掛到全域，讓 index.html 的按鈕 onclick="scan()" 能用
+// 中文備註：讓 onclick="scan()" 能呼叫
 window.scan = scan;
