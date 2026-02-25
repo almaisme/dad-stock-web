@@ -1,6 +1,6 @@
 // app.js
 // 中文備註：前端邏輯（Cloudflare Pages + Functions）
-// 重要：一律使用相對路徑 /api/scan，避免 https 頁面打到 http API 造成 Failed to fetch（混合內容被擋）
+// V1 固定 Top500 股票池（不給 UI 選 ALL/Top800），避免卡死/超時
 
 function toNumber(v, defVal) {
   const n = Number(v);
@@ -13,25 +13,24 @@ function fmt(n, d = 2) {
 }
 
 function getRulesFromUI() {
-  // 中文備註：均線輸入格式 "5,10,20"
   const maStr = (document.getElementById("maStr")?.value || "5,10,20").trim();
-  const parts = maStr.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
+  const parts = maStr
+    .split(",")
+    .map(s => Number(s.trim()))
+    .filter(n => Number.isFinite(n) && n > 0);
   const [ma_short, ma_mid, ma_long] = (parts.length >= 3) ? parts : [5, 10, 20];
 
-  // 中文備註：糾結參數（% 轉成小數）
   const tangle_lookback_days = toNumber(document.getElementById("tangleLookback")?.value, 5);
   const tangle_max_spread_pct = toNumber(document.getElementById("tangleSpreadPct")?.value, 3.0) / 100.0;
 
-  // 中文備註：量能參數
   const volume_multiplier = toNumber(document.getElementById("volMultiplier")?.value, 0.8);
   const volume_ma_days = toNumber(document.getElementById("volMaDays")?.value, 10);
 
-  // 中文備註：快取（分鐘 → 秒）
   const cacheMin = toNumber(document.getElementById("cacheMin")?.value, 20);
   const cache_ttl_seconds = Math.max(0, Math.floor(cacheMin * 60));
 
-  // 中文備註：股票池 Top N
-  const poolSize = toNumber(document.getElementById("poolSize")?.value, 500);
+  // ✅ 中文備註：V1 固定 Top 500
+  const pool_size = 500;
 
   return {
     ma_short, ma_mid, ma_long,
@@ -40,7 +39,7 @@ function getRulesFromUI() {
     volume_multiplier,
     volume_ma_days,
     cache_ttl_seconds,
-    pool_size: poolSize,
+    pool_size,
   };
 }
 
@@ -89,7 +88,7 @@ function renderTable(items) {
         <thead>
           <tr>
             <th>代碼</th>
-            <th>名稱（繁中）</th>
+            <th>名稱</th>
             <th>收盤</th>
             <th>MA短</th>
             <th>MA中</th>
@@ -105,6 +104,16 @@ function renderTable(items) {
   `;
 }
 
+function buildDiagText(diag) {
+  if (!diag) return "";
+  const a = [];
+  a.push(`診斷：Universe=${diag.universe_used}/${diag.universe_total}`);
+  a.push(`ISIN快取=${diag.universe_from_cache ? "是" : "否"}`);
+  a.push(`Fallback=${diag.universe_used_fallback ? "是" : "否"}`);
+  a.push(`Yahoo成功/失敗=${diag.yahoo_ok}/${diag.yahoo_fail}`);
+  return a.join("　|　");
+}
+
 async function scan() {
   const btn = document.getElementById("scanBtn");
   const statusText = document.getElementById("statusText");
@@ -115,7 +124,7 @@ async function scan() {
 
   btn.disabled = true;
   setPill("neutral", "掃描中…");
-  statusText.textContent = "掃描中，請稍等…（Top 500 大概比較穩）";
+  statusText.textContent = "掃描中，請稍等…";
   statusText.className = "statusText muted";
   resultArea.innerHTML = `<div class="mutedRow">掃描中，請稍等…</div>`;
 
@@ -132,9 +141,10 @@ async function scan() {
     const count = Number(data.count ?? 0);
     const cached = data.cached ? "（快取）" : "";
     const elapsed = data.elapsed_sec ? `　耗時：${data.elapsed_sec}s` : "";
+    const diagText = buildDiagText(data.diag);
 
     setPill("ok", `完成 ✅（符合 ${count}）`);
-    statusText.textContent = `完成 ✅　符合：${count}　${cached}${elapsed}`.trim();
+    statusText.textContent = `完成 ✅　符合：${count}　${cached}${elapsed}${diagText ? "　|　" + diagText : ""}`.trim();
     statusText.className = "statusText";
     resultArea.innerHTML = renderTable(data.items || []);
 
@@ -148,10 +158,9 @@ async function scan() {
   }
 }
 
-// 中文備註：初始化先渲染摘要
+// 中文備註：初始化規則摘要
 (function init() {
   try { renderRuleSummary(getRulesFromUI()); } catch {}
 })();
 
-// 中文備註：讓 onclick="scan()" 能呼叫
 window.scan = scan;
