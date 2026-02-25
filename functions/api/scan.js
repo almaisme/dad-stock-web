@@ -1,9 +1,10 @@
 // functions/api/scan.js
 // 中文備註：Cloudflare Pages Function：/api/scan
-// 功能：
-// 1) 先抓「證交所/櫃買 ISIN 清單」→ 取得【股票代碼 + 繁體中文名稱】
-// 2) 再用 Yahoo chart API 抓日線 → 算均線/糾結/量比 → 篩選
-// 3) 股票池先做 Top N（預設 500）避免超時；V2 再做全市場分批/排程
+// V1：固定 Top500 股票池（從 ISIN 抓全市場後切 Top500；抓不到就 fallback）
+// 修正版重點：
+// 1) ISIN 抓不到 → fallback（避免 universe=空導致 0.02s 秒回 0）
+// 2) 不快取「太少/空的 universe」
+// 3) 回傳 diag 診斷
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,7 +13,6 @@ const corsHeaders = {
   "Content-Type": "application/json; charset=utf-8",
 };
 
-// 中文備註：回 JSON 小工具
 function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -25,29 +25,27 @@ function toNumber(v, defVal) {
   return Number.isFinite(n) ? n : defVal;
 }
 
-// ==============================
-// 中文備註：1) 取得股票代碼＋繁中名稱（ISIN 清單）
-// ==============================
-
-// 中文備註：ISIN 清單（上市/上櫃）
-// 上市：strMode=2，上櫃：strMode=4
+// 中文備註：ISIN（上市/上櫃）
 const ISIN_URLS = [
   "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2",
   "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4",
 ];
 
-// 中文備註：從「有價證券代號及名稱」欄位抓出：例如 "2330 台積電"
+// 中文備註：fallback（ISIN 掛掉時至少能掃）
+const FALLBACK_CODES = [
+  "2330","2317","2454","2308","2412","2881","2882","2884","2886","2891",
+  "1301","1303","2002","2603","2609","2615","3034","2303","3711","2382",
+  "5871","5880","1101","1216","3045","3008","2883","2885","2892","2357",
+  "2379","3231","3661","6415","6505","5269","2207","2327","4938","2395"
+];
+
 function parseIsinHtmlToList(html) {
   const list = [];
-
-  // 取出所有 <tr> ... </tr>
   const trMatches = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
   for (const tr of trMatches) {
-    // 抓所有 <td> ... </td>
     const tds = tr.match(/<td[\s\S]*?<\/td>/gi) || [];
     if (tds.length < 1) continue;
 
-    // 第 1 欄通常是「有價證券代號及名稱」
     const td0 = tds[0]
       .replace(/<br\s*\/?>/gi, " ")
       .replace(/<[^>]+>/g, " ")
@@ -55,24 +53,19 @@ function parseIsinHtmlToList(html) {
       .replace(/\s+/g, " ")
       .trim();
 
-    // 只收「4 碼股票代號」：例如 "2330 台積電"
     const m = td0.match(/^(\d{4})\s+(.+)$/);
     if (!m) continue;
 
     const code = m[1];
     const name = (m[2] || "").trim();
-
-    // 中文備註：排除權證/奇怪代碼（通常不是 4 碼就已經被擋掉）
     if (!code || !name) continue;
 
     list.push({ code, name });
   }
-
   return list;
 }
 
-// 中文備註：抓 ISIN 清單並做快取（避免每次掃都打 ISIN）
-async function getUniverseFromIsin(context, ttlSec = 6 * 60 * 60) {
+async function getUniverseFromIsin(context) {
   const cache = caches.default;
   const day = new Date().toISOString().slice(0, 10);
   const cacheKey = `https://cache.local/universe?d=${day}`;
@@ -80,40 +73,50 @@ async function getUniverseFromIsin(context, ttlSec = 6 * 60 * 60) {
   const hit = await cache.match(cacheKey);
   if (hit) {
     const txt = await hit.text();
-    return JSON.parse(txt);
+    const obj = JSON.parse(txt);
+    return { ...obj, from_cache: true };
   }
 
+  const diag = { isin_fetch: [], parsed_count: 0 };
   const merged = [];
+
   for (const url of ISIN_URLS) {
-    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!res.ok) continue;
-    const html = await res.text();
-    merged.push(...parseIsinHtmlToList(html));
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+      diag.isin_fetch.push({ url, ok: res.ok, status: res.status });
+      if (!res.ok) continue;
+
+      const html = await res.text();
+      merged.push(...parseIsinHtmlToList(html));
+    } catch (e) {
+      diag.isin_fetch.push({ url, ok: false, status: "fetch_error" });
+    }
   }
 
-  // 中文備註：去重（同代碼只留第一個）
   const map = new Map();
-  for (const it of merged) {
-    if (!map.has(it.code)) map.set(it.code, it.name);
+  for (const it of merged) if (!map.has(it.code)) map.set(it.code, it.name);
+  const universe = Array.from(map.entries()).map(([code, name]) => ({ code, name }));
+  diag.parsed_count = universe.length;
+
+  // ✅ 太少就不快取，直接 fallback
+  if (universe.length < 100) {
+    const fallback = FALLBACK_CODES.map(code => ({ code, name: code }));
+    return { universe: fallback, from_cache: false, used_fallback: true, diag };
   }
 
-  const universe = Array.from(map.entries()).map(([code, name]) => ({ code, name }));
-
-  // 中文備註：寫入快取
-  const payload = JSON.stringify({ universe });
+  const payload = JSON.stringify({ universe, used_fallback: false, diag });
   const resp = new Response(payload, {
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `public, max-age=${ttlSec}` },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "public, max-age=21600",
+    },
   });
   context.waitUntil(cache.put(cacheKey, resp.clone()));
 
-  return { universe };
+  return { universe, from_cache: false, used_fallback: false, diag };
 }
 
-// ==============================
-// 中文備註：2) Yahoo 日線資料（用來算 MA）
-// ==============================
-
-// 中文備註：把 2330 轉成 Yahoo symbol（先試 .TW，失敗再試 .TWO）
+// Yahoo
 function buildSymbols(code) {
   return [`${code}.TW`, `${code}.TWO`];
 }
@@ -146,7 +149,6 @@ async function fetchYahooChart(symbol) {
     if (c == null || v == null) continue;
     rows.push({ close: Number(c), volume: Number(v) });
   }
-
   if (rows.length < 60) throw new Error("not enough data");
   return rows;
 }
@@ -165,7 +167,6 @@ function avg(values, window) {
   return sum / window;
 }
 
-// 中文備註：判斷「三線糾結」：最近 lookback 天內，三條均線最大擴散 <= 閾值
 function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
   const n = closes.length;
   const start = Math.max(0, n - lookbackDays);
@@ -185,13 +186,8 @@ function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
     const spread = (mx - mn) / c;
     if (spread > maxSpreadPct) return false;
   }
-
   return true;
 }
-
-// ==============================
-// 中文備註：3) API Handler
-// ==============================
 
 export async function onRequest(context) {
   const { request } = context;
@@ -210,7 +206,6 @@ export async function onRequest(context) {
     const body = await request.json();
     const rules = body?.rules || {};
 
-    // 中文備註：規則（跟 app.js 一致）
     const ma_short = toNumber(rules.ma_short, 5);
     const ma_mid = toNumber(rules.ma_mid, 10);
     const ma_long = toNumber(rules.ma_long, 20);
@@ -222,9 +217,10 @@ export async function onRequest(context) {
     const volume_ma_days = toNumber(rules.volume_ma_days, 10);
 
     const cache_ttl_seconds = Math.max(0, toNumber(rules.cache_ttl_seconds, 1200));
-    const pool_size = Math.max(50, Math.min(1200, toNumber(rules.pool_size, 500)));
 
-    // 中文備註：結果快取（同一組規則 + 同一天）
+    // ✅ V1 固定 Top500
+    const pool_size = 500;
+
     const day = new Date().toISOString().slice(0, 10);
     const cacheKeyObj = {
       ma_short, ma_mid, ma_long,
@@ -246,26 +242,38 @@ export async function onRequest(context) {
       }
     }
 
-    // 中文備註：先拿「繁中名稱」的股票清單（上市+上櫃）
     const uni = await getUniverseFromIsin(context);
-    const universe = (uni?.universe || []).slice(0, pool_size); // 中文備註：Top N（V1 先做穩）
+    const rawUniverse = uni?.universe || [];
+    const universe = rawUniverse.slice(0, pool_size);
+
+    const diag = {
+      universe_total: rawUniverse.length,
+      universe_used: universe.length,
+      universe_from_cache: !!uni.from_cache,
+      universe_used_fallback: !!uni.used_fallback,
+      isin_diag: uni.diag || null,
+      yahoo_ok: 0,
+      yahoo_fail: 0,
+    };
 
     const items = [];
 
-    // 中文備註：逐檔掃描（V1：Top500）
     for (const { code, name } of universe) {
       const candidates = buildSymbols(code);
-
       let rows = null;
+
       for (const sym of candidates) {
         try {
           rows = await fetchYahooChart(sym);
+          diag.yahoo_ok += 1;
           break;
-        } catch (e) {
-          // 中文備註：試下一個市場別
-        }
+        } catch (e) {}
       }
-      if (!rows) continue;
+
+      if (!rows) {
+        diag.yahoo_fail += 1;
+        continue;
+      }
 
       const closes = rows.map(r => r.close);
       const vols = rows.map(r => r.volume);
@@ -282,22 +290,16 @@ export async function onRequest(context) {
       if (vma == null || vma <= 0) continue;
       const vol_ratio = volume / vma;
 
-      // 條件 1：三線糾結
       const tangled = isTangled(closes, ma_short, ma_mid, ma_long, tangle_lookback_days, tangle_max_spread_pct);
       if (!tangled) continue;
 
-      // 條件 2：均線多頭排列
       if (!(maS > maM && maM > maL)) continue;
-
-      // 條件 3：收盤站上三線
       if (!(close >= maS && close >= maM && close >= maL)) continue;
-
-      // 條件 4：量能
       if (!(vol_ratio >= volume_multiplier)) continue;
 
       items.push({
         code,
-        name, // ✅ 中文備註：這裡就是繁體中文名稱
+        name: name || code,
         close,
         ma_short: maS,
         ma_mid: maM,
@@ -308,7 +310,6 @@ export async function onRequest(context) {
       });
     }
 
-    // 中文備註：量比由大到小
     items.sort((a, b) => (b.vol_ratio || 0) - (a.vol_ratio || 0));
 
     const elapsed_sec = ((Date.now() - t0) / 1000).toFixed(2);
@@ -318,6 +319,7 @@ export async function onRequest(context) {
       cached: false,
       elapsed_sec,
       items,
+      diag,
     };
 
     if (cache_ttl_seconds > 0) {
