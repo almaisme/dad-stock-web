@@ -1,20 +1,76 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <title>台股搜尋器 V1.0</title>
-  <link rel="stylesheet" href="./styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>台股搜尋器 V1.0（進階）</title>
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <div class="page">
+    <header class="topbar">
+      <div>
+        <h1>台股搜尋器 <span class="tag">V1.0 進階</span></h1>
+        <div class="sub">資料來源：後端 /api/scan（Cloudflare Pages Functions）</div>
+      </div>
+      <button id="scanBtn" class="btn" onclick="scan()">一鍵搜尋</button>
+    </header>
 
-  <h1>台股搜尋器 V1.0</h1>
+    <section class="card">
+      <h2>可調整條件</h2>
 
-  <button id="scanBtn" onclick="scan()">一鍵搜尋</button>
+      <div class="grid">
+        <label class="field">
+          <div class="label">均線（短/中/長）</div>
+          <input id="maStr" class="input" value="5,10,20" placeholder="例如 5,10,20" />
+        </label>
 
-  <div id="status"></div>
-  <div id="resultArea"></div>
+        <label class="field">
+          <div class="label">糾結回看天數</div>
+          <input id="tangleLookback" class="input" value="10" type="number" min="1" />
+        </label>
+
+        <label class="field">
+          <div class="label">糾結最大擴散（%）</div>
+          <input id="tangleSpreadPct" class="input" value="1.5" type="number" step="0.1" min="0" />
+        </label>
+
+        <label class="field">
+          <div class="label">量能條件（今日量 ≥ 均量 × 倍數）</div>
+          <input id="volMultiplier" class="input" value="1.0" type="number" step="0.1" min="0" />
+        </label>
+
+        <label class="field">
+          <div class="label">均量天數</div>
+          <input id="volMaDays" class="input" value="10" type="number" min="1" />
+        </label>
+
+        <label class="field">
+          <div class="label">快取分鐘（避免一直掃描被擋）</div>
+          <input id="cacheMin" class="input" value="10" type="number" min="0" />
+        </label>
+      </div>
+
+      <div class="hint">
+        <b>規則摘要：</b>
+        1）找 5/10/20 均線糾結後上揚、且股價站上三線；
+        2）量能：今日量 ≥ 均量 × 倍數；
+        3）糾結：回看 N 天內三線最大擴散 ≤ X%。
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>搜尋結果</h2>
+        <div id="status" class="status">尚未搜尋</div>
+      </div>
+
+      <div id="resultArea" class="result">
+        <div class="mutedRow">按上方「一鍵搜尋」開始掃描。</div>
+      </div>
+    </section>
+  </div>
 
   <script src="./app.js"></script>
-
 </body>
 </html>
