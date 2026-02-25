@@ -1,7 +1,7 @@
 // functions/api/scan.js
 // 中文備註：Cloudflare Pages Function：/api/scan
 // 功能：抓 Yahoo Finance 日線資料 → 計算均線/量比 → 依規則篩選 → 回傳給前端表格
-// 注意：為了避免一次掃全市場超時，先內建一個「股票池」(你可自行加碼)
+// 注意：為了避免一次掃全市場超時，先內建「股票池」(你可自行加碼)
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,7 +25,6 @@ function toNumber(v, defVal) {
 }
 
 // 中文備註：股票池（先用常見大型股示範，避免一次掃太多超時）
-// 你要擴充就把代碼加進去即可（只填數字，像 2330）
 const UNIVERSE_CODES = [
   "2330", "2317", "2454", "2308", "2412",
   "2881", "2882", "2884", "2886", "2891",
@@ -38,8 +37,7 @@ function buildSymbols(code) {
   return [`${code}.TW`, `${code}.TWO`];
 }
 
-// 中文備註：抓 Yahoo 日線（用 chart API）
-// range 先用 1y，夠算 20MA + lookback
+// 中文備註：抓 Yahoo 日線（chart API）
 async function fetchYahooChart(symbol) {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
@@ -47,9 +45,9 @@ async function fetchYahooChart(symbol) {
 
   const res = await fetch(url, {
     headers: {
-      // 中文備註：加 UA 有時比較不容易被擋
       "User-Agent": "Mozilla/5.0",
       "Accept": "application/json",
+      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     },
   });
 
@@ -79,7 +77,6 @@ async function fetchYahooChart(symbol) {
 }
 
 // 中文備註：批次抓名稱（Yahoo quote API）
-// 這支通常會回 shortName / longName
 async function fetchYahooNames(symbols) {
   const url =
     `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}`;
@@ -88,6 +85,7 @@ async function fetchYahooNames(symbols) {
     headers: {
       "User-Agent": "Mozilla/5.0",
       "Accept": "application/json",
+      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     },
   });
 
@@ -120,13 +118,12 @@ function avg(values, window) {
   return sum / window;
 }
 
-// 中文備註：判斷「三線糾結」：最近 lookback 天內，三條均線的最大擴散 <= 閾值
+// 中文備註：「三線糾結」：最近 lookback 天內，每一天三條 MA 的最大擴散 <= 閾值
 function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
   const n = closes.length;
   const start = Math.max(0, n - lookbackDays);
 
   for (let i = start; i < n; i++) {
-    // 中文備註：每一天都要能算出三條 MA
     const slice = closes.slice(0, i + 1);
     const s = sma(slice, maS);
     const m = sma(slice, maM);
@@ -151,7 +148,7 @@ export async function onRequest(context) {
   // 中文備註：CORS 預檢
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  // 中文備註：健康檢查
+  // 中文備註：健康檢查（你開 /api/scan 會看到這句）
   if (request.method === "GET") {
     return json({ ok: true, message: "✅ /api/scan 正常（請用 POST）" });
   }
@@ -166,27 +163,26 @@ export async function onRequest(context) {
     const body = await request.json();
     const rules = body?.rules || {};
 
-    // 中文備註：讀規則（跟你 app.js 的 rules 欄位一致）
+    // 中文備註：讀規則（跟 app.js 一致）
     const ma_short = toNumber(rules.ma_short, 5);
     const ma_mid = toNumber(rules.ma_mid, 10);
     const ma_long = toNumber(rules.ma_long, 20);
 
     const tangle_lookback_days = toNumber(rules.tangle_lookback_days, 10);
-    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.015); // 已經是小數（1.5% = 0.015）
+    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.015); // 小數（1.5% = 0.015）
 
     const volume_multiplier = toNumber(rules.volume_multiplier, 1.0);
     const volume_ma_days = toNumber(rules.volume_ma_days, 10);
 
     const cache_ttl_seconds = Math.max(0, toNumber(rules.cache_ttl_seconds, 600));
 
-    // 中文備註：快取 key（同一組規則在 TTL 內就直接回）
+    // 中文備註：快取 key（同一組規則 + 今日日期）
     const cacheKeyObj = {
       ma_short, ma_mid, ma_long,
       tangle_lookback_days,
       tangle_max_spread_pct,
       volume_multiplier,
       volume_ma_days,
-      // 中文備註：加上日期，避免隔天還拿到前一天結果
       day: new Date().toISOString().slice(0, 10),
     };
     const cacheKey = "https://cache.local/scan?" + encodeURIComponent(JSON.stringify(cacheKeyObj));
@@ -200,9 +196,8 @@ export async function onRequest(context) {
       }
     }
 
-    // 中文備註：先組出 symbol 清單（每個 code 先試 .TW，失敗再試 .TWO）
     const items = [];
-    const resolvedSymbols = []; // 用來抓名稱
+    const resolvedSymbols = [];
 
     for (const code of UNIVERSE_CODES) {
       const candidates = buildSymbols(code);
@@ -215,9 +210,7 @@ export async function onRequest(context) {
           rows = await fetchYahooChart(sym);
           usedSymbol = sym;
           break;
-        } catch (e) {
-          // 中文備註：這個 symbol 失敗就試下一個
-        }
+        } catch (_) {}
       }
 
       if (!rows || !usedSymbol) continue;
@@ -225,27 +218,23 @@ export async function onRequest(context) {
       const closes = rows.map(r => r.close);
       const vols = rows.map(r => r.volume);
 
-      // 中文備註：今日數據
       const close = closes[closes.length - 1];
       const volume = vols[vols.length - 1];
 
-      // 中文備註：今日三條 MA
       const maS = sma(closes, ma_short);
       const maM = sma(closes, ma_mid);
       const maL = sma(closes, ma_long);
       if (maS == null || maM == null || maL == null) continue;
 
-      // 中文備註：均量 + 量比
       const vma = avg(vols, volume_ma_days);
       if (vma == null || vma <= 0) continue;
       const vol_ratio = volume / vma;
 
-      // ✅ 中文備註：篩選條件（符合你畫面那套）
       // 1) 三線糾結
       const tangled = isTangled(closes, ma_short, ma_mid, ma_long, tangle_lookback_days, tangle_max_spread_pct);
       if (!tangled) continue;
 
-      // 2) 均線多頭排列（短 > 中 > 長）
+      // 2) 多頭排列（短 > 中 > 長）
       if (!(maS > maM && maM > maL)) continue;
 
       // 3) 收盤站上三線
@@ -257,7 +246,7 @@ export async function onRequest(context) {
       items.push({
         code,
         symbol: usedSymbol,
-        name: "", // 先空，後面批次補
+        name: "",
         close,
         ma_short: maS,
         ma_mid: maM,
@@ -274,7 +263,7 @@ export async function onRequest(context) {
     const nameMap = resolvedSymbols.length ? await fetchYahooNames(resolvedSymbols) : new Map();
     for (const it of items) {
       it.name = nameMap.get(it.symbol) || it.code;
-      delete it.symbol; // 中文備註：前端不用顯示 symbol
+      delete it.symbol;
     }
 
     // 中文備註：排序（量比由大到小）
