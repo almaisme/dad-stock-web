@@ -1,6 +1,6 @@
 // app.js
 // 中文備註：前端邏輯（Cloudflare Pages + Functions）
-// 重要：一律使用相對路徑 /api/scan，避免 https 頁面打到 http API 造成 Failed to fetch（混合內容被擋）
+// 重要：一律使用相對路徑 /api/scan，避免 https -> http 混合內容造成 Failed to fetch
 
 function toNumber(v, defVal) {
   const n = Number(v);
@@ -116,7 +116,7 @@ async function scan() {
   resultArea.innerHTML = `<div class="mutedRow">掃描中，請稍等…</div>`;
 
   try {
-    // ✅ 關鍵：用同網域相對路徑，避免 https -> http 被擋
+    // ✅ 關鍵：同網域相對路徑 /api/scan
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -155,5 +155,5 @@ async function scan() {
   } catch {}
 })();
 
-// 中文備註：把 scan 掛到全域，讓 index.html 的按鈕 onclick="scan()" 能用
+// 中文備註：讓 index.html 的 onclick="scan()" 找得到
 window.scan = scan;
