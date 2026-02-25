@@ -1,7 +1,7 @@
 // functions/api/scan.js
-// 中文備註：Cloudflare Pages Function（/api/scan）
-// 目前先回傳假資料（確保前後端格式、表格顯示、流程都正常）
-// 下一步再把假資料改成「真的掃描台股」即可
+// 中文備註：Cloudflare Pages Function（路由：/api/scan）
+// 先回假資料，確保前端 UI、表格、流程全部正常
+// 下一步再改成真的抓 Yahoo！股市資料
 
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj, null, 2), {
@@ -21,12 +21,11 @@ export async function onRequest(context) {
   // 中文備註：處理 CORS 預檢
   if (request.method === "OPTIONS") return json({ ok: true }, 200);
 
-  // 中文備註：健康檢查（用瀏覽器直接開 /api/scan 會走 GET）
+  // 中文備註：用瀏覽器直接開 /api/scan 會走 GET，用來測試 API 是否存在
   if (request.method === "GET") {
-    return json({ ok: true, message: "✅ /api/scan 正常（請用 POST 才會掃描）" }, 200);
+    return json({ ok: true, message: "✅ /api/scan 正常（請用 POST 才會回結果）" }, 200);
   }
 
-  // 中文備註：只允許 POST
   if (request.method !== "POST") {
     return json({ ok: false, error: "Method Not Allowed" }, 405);
   }
@@ -37,7 +36,7 @@ export async function onRequest(context) {
     const body = await request.json().catch(() => ({}));
     const rules = body?.rules || {};
 
-    // 中文備註：假資料（先確保前端表格顯示正確）
+    // 中文備註：假資料（先確保 UI 100% 跑起來）
     const items = [
       {
         code: "2330",
@@ -65,14 +64,13 @@ export async function onRequest(context) {
 
     const elapsed_sec = Number(((Date.now() - t0) / 1000).toFixed(2));
 
-    // 中文備註：統一回傳格式（前端依這格式渲染）
     return json({
       ok: true,
-      receivedRules: rules, // 你要除錯可先留著，之後上線可移除
       count: items.length,
       cached: false,
       elapsed_sec,
       items,
+      receivedRules: rules
     }, 200);
 
   } catch (e) {
