@@ -18,7 +18,7 @@
     <button id="scanBtn" class="primaryBtn" onclick="scan()">一鍵搜尋</button>
   </header>
 
-  <!-- 中文備註：主內容區（改成單欄） -->
+  <!-- 中文備註：主內容區（單欄） -->
   <main class="wrap">
     <section class="contentFull">
 
@@ -29,6 +29,7 @@
           <div class="cardHint">資料來源：Yahoo！股市</div>
         </div>
 
+        <!-- 中文備註：預設改寬鬆，盡量多筆 -->
         <div class="grid6">
           <div class="ruleBox">
             <div class="ruleLabel">均線（短 / 中 / 長）</div>
@@ -37,17 +38,17 @@
 
           <div class="ruleBox">
             <div class="ruleLabel">糾結回看天數</div>
-            <input id="tangleLookback" class="ruleInput" value="10" />
+            <input id="tangleLookback" class="ruleInput" value="5" />
           </div>
 
           <div class="ruleBox">
             <div class="ruleLabel">糾結最大擴散（%）</div>
-            <input id="tangleSpreadPct" class="ruleInput" value="1.5" />
+            <input id="tangleSpreadPct" class="ruleInput" value="5.0" />
           </div>
 
           <div class="ruleBox">
             <div class="ruleLabel">量能條件（今日量 ≥ 均量 × 倍數）</div>
-            <input id="volMultiplier" class="ruleInput" value="1.0" />
+            <input id="volMultiplier" class="ruleInput" value="0.6" />
           </div>
 
           <div class="ruleBox">
