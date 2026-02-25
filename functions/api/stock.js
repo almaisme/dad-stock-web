@@ -1,230 +1,252 @@
-export async function onRequestGet(context) {
-  const url = new URL(context.request.url);
-  const code = (url.searchParams.get("code") || "").trim();
+// functions/api/stock.js
+// 中文備註：Cloudflare Pages Function：股票資料 API（使用 FinMind，避免 TPEx 網頁版無限轉址）
+// 路徑：/api/stock?code=2330
+// 回傳：近 120 天日線資料 + SMA5/10/20 + 三線合一判斷
 
-  if (!/^\d{4,6}$/.test(code)) {
-    return json({ ok: false, error: "請輸入正確股號（4~6 碼數字）" }, 400);
-  }
+export async function onRequestGet(context) {
+  // === CORS 設定（讓前端可直接呼叫）===
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type": "application/json; charset=utf-8",
+  };
 
   try {
-    const rt = await fetchRealtime(code);
+    const url = new URL(context.request.url);
+    const code = (url.searchParams.get("code") || "").trim();
 
-    if (!rt || !rt.ok) {
-      return json({ ok: false, error: "查不到此股號，請確認是否為上市/上櫃股號" }, 404);
+    // 中文備註：基本檢查
+    if (!code) {
+      return json(
+        { ok: false, error: "缺少參數 code，例如 /api/stock?code=2330" },
+        400,
+        corsHeaders
+      );
     }
 
-    const daily = await fetchDailyLastMonths(code, rt.market, 3);
-    const analysis = calcThreeLines(daily);
+    // 中文備註：只允許常見台股代號格式（4~6 碼數字）
+    if (!/^\d{4,6}$/.test(code)) {
+      return json(
+        { ok: false, error: "code 格式錯誤，請輸入 4~6 碼數字代號（例如 2330）" },
+        400,
+        corsHeaders
+      );
+    }
 
-    return json({
-      ok: true,
-      code,
-      market: rt.market,
-      name: rt.name,
-      realtime: {
-        price: rt.price,
-        change: rt.change,
-        changePct: rt.changePct,
-        time: rt.time,
-      },
-      daily: {
-        count: daily.length,
-        lastDate: daily.length ? daily[daily.length - 1].date : null,
-      },
-      threeLines: analysis,
-    });
-  } catch (e) {
-    return json({ ok: false, error: `API 發生錯誤：${String(e?.message || e)}` }, 500);
-  }
-}
+    // === 取得時間範圍（近 120 天，足夠算 SMA20/量均）===
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 140); // 多抓一點，避免遇到假日
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
+    const startDate = formatDate(start); // YYYY-MM-DD
+    const endDate = formatDate(end);     // YYYY-MM-DD
 
-async function fetchRealtime(code) {
-  const candidates = [
-    { market: "tse", ex_ch: `tse_${code}.tw` },
-    { market: "otc", ex_ch: `otc_${code}.tw` },
-  ];
+    // === 呼叫 FinMind（免 token 也可用，但可能有頻率限制）===
+    // 中文備註：用 Cloudflare cache 降低被限流機率（同一代號 30 秒內重複查詢直接用快取）
+    const cacheKey = new Request(
+      `https://cache.local/api/stock?code=${code}&start=${startDate}&end=${endDate}`,
+      { method: "GET" }
+    );
+    const cache = caches.default;
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
 
-  for (const c of candidates) {
-    const api = new URL("https://mis.twse.com.tw/stock/api/getStockInfo.jsp");
-    api.searchParams.set("ex_ch", c.ex_ch);
-    api.searchParams.set("json", "1");
-    api.searchParams.set("delay", "0");
+    const finmindUrl = new URL("https://api.finmindtrade.com/api/v4/data");
+    finmindUrl.searchParams.set("dataset", "TaiwanStockPrice");
+    finmindUrl.searchParams.set("stock_id", code);
+    finmindUrl.searchParams.set("start_date", startDate);
+    finmindUrl.searchParams.set("end_date", endDate);
 
-    const res = await fetch(api.toString(), {
+    const r = await fetch(finmindUrl.toString(), {
       headers: {
-        "user-agent": "Mozilla/5.0",
-        "accept": "application/json,text/plain,*/*",
-        "referer": "https://mis.twse.com.tw/stock/fibest.jsp",
+        "User-Agent": "dad-stock-web/1.0 (Cloudflare Pages Function)",
+        "Accept": "application/json",
       },
     });
 
-    if (!res.ok) continue;
-    const data = await res.json();
-    const arr = data?.msgArray;
-    if (!Array.isArray(arr) || arr.length === 0) continue;
-
-    const item = arr[0];
-    const name = item?.n || "";
-    const priceStr = item?.z;
-    const prevStr = item?.y;
-    const time = `${item?.t || ""}`.trim();
-
-    const price = toNum(priceStr);
-    const prev = toNum(prevStr);
-
-    if (!isFinite(price) || price <= 0) continue;
-
-    const change = isFinite(prev) && prev > 0 ? round(price - prev, 2) : null;
-    const changePct = isFinite(prev) && prev > 0 ? round(((price - prev) / prev) * 100, 2) : null;
-
-    return {
-      ok: true,
-      market: c.market,
-      name,
-      price,
-      change,
-      changePct,
-      time,
-    };
-  }
-
-  return { ok: false };
-}
-
-async function fetchDailyLastMonths(code, market, months) {
-  const now = new Date();
-  const all = [];
-
-  for (let i = 0; i < months; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const date = `${y}${m}01`;
-
-    const url =
-      market === "otc"
-        ? `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${y}/${m}&stkno=${code}`
-        : `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${date}&stockNo=${code}`;
-
-    const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
-    if (!res.ok) continue;
-
-    const data = await res.json();
-
-    if (market === "otc") {
-      const aaData = data?.aaData;
-      if (!Array.isArray(aaData)) continue;
-
-      for (const row of aaData) {
-        if (!Array.isArray(row) || row.length < 7) continue;
-        const dateStr = row[0];
-        const volume = toInt(row[1]);
-        const close = toNum(row[6]);
-
-        all.push({ date: dateStr, close, volume });
-      }
-    } else {
-      const rows = data?.data;
-      if (!Array.isArray(rows)) continue;
-
-      for (const row of rows) {
-        if (!Array.isArray(row) || row.length < 7) continue;
-        const dateStr = row[0];
-        const volume = toInt(row[1]);
-        const close = toNum(row[6]);
-
-        all.push({ date: dateStr, close, volume });
-      }
+    if (!r.ok) {
+      const text = await safeText(r);
+      return json(
+        {
+          ok: false,
+          error: `FinMind HTTP ${r.status}`,
+          detail: text?.slice(0, 300) || "",
+        },
+        502,
+        corsHeaders
+      );
     }
-  }
 
-  const cleaned = all
-    .filter((x) => isFinite(x.close) && x.close > 0 && isFinite(x.volume))
-    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const data = await r.json();
 
-  const dedup = [];
-  const seen = new Set();
-  for (const x of cleaned) {
-    if (!seen.has(x.date)) {
-      seen.add(x.date);
-      dedup.push(x);
+    // 中文備註：FinMind 正常會回傳 { status: 200, data: [...] }
+    if (!data || !Array.isArray(data.data) || data.data.length === 0) {
+      return json(
+        { ok: false, error: "查無資料（可能代號不存在或資料源暫時無回應）" },
+        404,
+        corsHeaders
+      );
     }
-  }
 
-  return dedup.slice(Math.max(0, dedup.length - 80));
-}
+    // === 整理 K 線資料（由舊到新排序）===
+    const rows = data.data
+      .map((x) => ({
+        date: x.date,
+        open: toNum(x.open),
+        high: toNum(x.max),
+        low: toNum(x.min),
+        close: toNum(x.close),
+        volume: toNum(x.Trading_Volume),
+      }))
+      .filter((x) => Number.isFinite(x.close))
+      .sort((a, b) => a.date.localeCompare(b.date));
 
-function calcThreeLines(daily) {
-  if (!Array.isArray(daily) || daily.length < 25) {
-    return { ok: false, reason: "日線資料不足（至少需要約 25 根 K）" };
-  }
+    if (rows.length < 30) {
+      return json(
+        { ok: false, error: "資料天數不足（小於 30 日），無法可靠計算三線合一" },
+        422,
+        corsHeaders
+      );
+    }
 
-  const closes = daily.map((d) => d.close);
-  const vols = daily.map((d) => d.volume);
-  const last = daily[daily.length - 1];
+    // === 計算 SMA5/10/20 + 10日均量 ===
+    const closes = rows.map((x) => x.close);
+    const volumes = rows.map((x) => x.volume);
 
-  const ma5 = sma(closes, 5);
-  const ma10 = sma(closes, 10);
-  const ma20 = sma(closes, 20);
+    const sma5 = calcSMA(closes, 5);
+    const sma10 = calcSMA(closes, 10);
+    const sma20 = calcSMA(closes, 20);
+    const vma10 = calcSMA(volumes, 10);
 
-  const ma5Prev = sma(closes.slice(0, -1), 5);
-  const ma10Prev = sma(closes.slice(0, -1), 10);
-  const ma20Prev = sma(closes.slice(0, -1), 20);
+    const enriched = rows.map((x, i) => ({
+      ...x,
+      sma5: sma5[i],
+      sma10: sma10[i],
+      sma20: sma20[i],
+      vma10: vma10[i],
+    }));
 
-  const vol10 = sma(vols, 10);
-  const todayVol = last.volume;
+    // === 三線合一判斷（偏保守、可用）===
+    // 規則：5/10/20 糾結 → 向上排列 → 股價站上三線 → 量大於10日均量
+    const last = enriched[enriched.length - 1];
 
-  const priceAbove = last.close > ma5 && last.close > ma10 && last.close > ma20;
-  const arranged = ma5 > ma10 && ma10 > ma20;
-  const trendingUp = ma5 > ma5Prev && ma10 > ma10Prev && ma20 > ma20Prev;
-  const volOk = todayVol > vol10;
+    const hasMA = [last.sma5, last.sma10, last.sma20].every(Number.isFinite);
+    if (!hasMA) {
+      return json(
+        { ok: false, error: "均線計算不足（可能資料不足或 volume 缺漏）" },
+        422,
+        corsHeaders
+      );
+    }
 
-  const avg = (ma5 + ma10 + ma20) / 3;
-  const spread = (Math.max(ma5, ma10, ma20) - Math.min(ma5, ma10, ma20)) / avg;
-  const tangled = spread <= 0.01;
+    // 中文備註：糾結定義：最近 5 天內，三條均線最大最小差距 < 1.5%（可調）
+    const tangleWindow = enriched.slice(-5);
+    const tangleOk = tangleWindow.every((d) => {
+      const arr = [d.sma5, d.sma10, d.sma20].filter(Number.isFinite);
+      if (arr.length < 3) return false;
+      const max = Math.max(...arr);
+      const min = Math.min(...arr);
+      const base = d.close || max;
+      return base > 0 ? (max - min) / base <= 0.015 : false;
+    });
 
-  const score =
-    (priceAbove ? 1 : 0) +
-    (arranged ? 1 : 0) +
-    (trendingUp ? 1 : 0) +
-    (volOk ? 1 : 0) +
-    (tangled ? 1 : 0);
+    // 中文備註：向上排列
+    const arrangedUp = last.sma5 > last.sma10 && last.sma10 > last.sma20;
 
-  return {
-    ok: true,
-    close: last.close,
-    ma5: round(ma5, 2),
-    ma10: round(ma10, 2),
-    ma20: round(ma20, 2),
-    tangled: { pass: tangled },
-    arranged: { pass: arranged },
-    trendingUp: { pass: trendingUp },
-    priceAbove: { pass: priceAbove },
-    volume: { pass: volOk },
-    score,
-    verdict:
+    // 中文備註：站上三線
+    const priceAbove =
+      last.close > last.sma5 && last.close > last.sma10 && last.close > last.sma20;
+
+    // 中文備註：量 > 10 日均量（若 volume 缺就不強制）
+    const volOk =
+      Number.isFinite(last.volume) && Number.isFinite(last.vma10)
+        ? last.volume > last.vma10
+        : false;
+
+    // 中文備註：計分（方便你前端顯示）
+    let score = 0;
+    if (tangleOk) score += 1;
+    if (arrangedUp) score += 1;
+    if (priceAbove) score += 1;
+    if (volOk) score += 1;
+
+    const verdict =
       score >= 4
         ? "✅ 接近三線合一（偏多）"
         : score === 3
         ? "🟡 中性偏多"
-        : "⚪ 尚未形成",
-  };
+        : score === 2
+        ? "🟠 還在整理"
+        : "⚪ 尚未形成";
+
+    const result = {
+      ok: true,
+      source: "FinMind:TaiwanStockPrice",
+      query: { code, startDate, endDate },
+      last: {
+        date: last.date,
+        close: last.close,
+        volume: last.volume,
+        sma5: round(last.sma5, 3),
+        sma10: round(last.sma10, 3),
+        sma20: round(last.sma20, 3),
+        vma10: round(last.vma10, 0),
+      },
+      threeLine: {
+        tangle: { pass: tangleOk },
+        arrangedUp: { pass: arrangedUp },
+        priceAbove: { pass: priceAbove },
+        volume: { pass: volOk },
+        score,
+        verdict,
+      },
+      // 中文備註：給前端畫線/計算用（近 120 天）
+      candles: enriched.slice(-120).map((d) => ({
+        date: d.date,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+        volume: d.volume,
+        sma5: safeRound(d.sma5, 3),
+        sma10: safeRound(d.sma10, 3),
+        sma20: safeRound(d.sma20, 3),
+        vma10: safeRound(d.vma10, 0),
+      })),
+    };
+
+    const response = json(result, 200, corsHeaders);
+
+    // 中文備註：快取 30 秒（避免連點導致被 API 限流）
+    response.headers.set("Cache-Control", "public, max-age=30");
+
+    // 中文備註：寫入 Cloudflare Cache
+    context.waitUntil(cache.put(cacheKey, response.clone()));
+
+    return response;
+  } catch (err) {
+    return json(
+      { ok: false, error: "API 發生例外", detail: String(err?.message || err) },
+      500,
+      corsHeaders
+    );
+  }
 }
 
-function sma(arr, n) {
-  const s = arr.slice(-n);
-  const sum = s.reduce((a, b) => a + b, 0);
-  return sum / n;
+// =====================
+// 工具函式（中文備註）
+// =====================
+
+function json(obj, status, headers) {
+  return new Response(JSON.stringify(obj, null, 2), { status, headers });
+}
+
+function formatDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function toNum(x) {
@@ -233,13 +255,41 @@ function toNum(x) {
   return Number.isFinite(v) ? v : NaN;
 }
 
-function toInt(x) {
-  const s = String(x ?? "").replace(/,/g, "").trim();
-  const v = parseInt(s, 10);
-  return Number.isFinite(v) ? v : NaN;
+function calcSMA(arr, n) {
+  const out = new Array(arr.length).fill(NaN);
+  let sum = 0;
+  let q = [];
+
+  for (let i = 0; i < arr.length; i++) {
+    const v = arr[i];
+    q.push(v);
+    sum += Number.isFinite(v) ? v : 0;
+
+    if (q.length > n) {
+      const removed = q.shift();
+      sum -= Number.isFinite(removed) ? removed : 0;
+    }
+
+    if (q.length === n && q.every(Number.isFinite)) {
+      out[i] = sum / n;
+    }
+  }
+  return out;
 }
 
 function round(x, d) {
   const p = 10 ** d;
   return Math.round(x * p) / p;
+}
+
+function safeRound(x, d) {
+  return Number.isFinite(x) ? round(x, d) : null;
+}
+
+async function safeText(resp) {
+  try {
+    return await resp.text();
+  } catch {
+    return "";
+  }
 }
