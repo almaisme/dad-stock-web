@@ -13,16 +13,20 @@ function fmt(n, d = 2) {
 }
 
 function getRulesFromUI() {
+  // 中文備註：均線輸入格式 "5,10,20"
   const maStr = (document.getElementById("maStr")?.value || "5,10,20").trim();
   const parts = maStr.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
   const [ma_short, ma_mid, ma_long] = (parts.length >= 3) ? parts : [5, 10, 20];
 
+  // 中文備註：糾結參數（% 轉成小數）
   const tangle_lookback_days = toNumber(document.getElementById("tangleLookback")?.value, 5);
-  const tangle_max_spread_pct = toNumber(document.getElementById("tangleSpreadPct")?.value, 5.0) / 100.0;
+  const tangle_max_spread_pct = toNumber(document.getElementById("tangleSpreadPct")?.value, 5) / 100.0;
 
-  const volume_multiplier = toNumber(document.getElementById("volMultiplier")?.value, 0.6);
+  // 中文備註：量能參數
+  const volume_multiplier = toNumber(document.getElementById("volMultiplier")?.value, 0.5);
   const volume_ma_days = toNumber(document.getElementById("volMaDays")?.value, 10);
 
+  // 中文備註：快取（分鐘 → 秒）
   const cacheMin = toNumber(document.getElementById("cacheMin")?.value, 10);
   const cache_ttl_seconds = Math.max(0, Math.floor(cacheMin * 60));
 
@@ -37,6 +41,7 @@ function getRulesFromUI() {
 }
 
 function renderRuleSummary(rules) {
+  // 中文備註：把目前規則變成人看得懂的摘要
   const ul = document.getElementById("ruleSummary");
   if (!ul) return;
 
@@ -44,6 +49,7 @@ function renderRuleSummary(rules) {
     <li>找出 ${rules.ma_short}/${rules.ma_mid}/${rules.ma_long} 日均線「糾結」後，且股價站上三線的股票。</li>
     <li>糾結：回看 ${rules.tangle_lookback_days} 天，三線最大擴散 ≤ ${(rules.tangle_max_spread_pct * 100).toFixed(2)}%。</li>
     <li>量能：今日量 ≥ ${rules.volume_ma_days} 日均量 × ${rules.volume_multiplier.toFixed(2)}。</li>
+    <li>股票池：Top 500（自動抓名單，避免一次掃全市場超時）。</li>
     <li>快取：${Math.round(rules.cache_ttl_seconds / 60)} 分鐘（避免一直掃被擋/變慢）。</li>
   `;
 }
@@ -63,7 +69,7 @@ function renderTable(items) {
   const rows = items.map(x => `
     <tr>
       <td><span class="codePill">${x.code}</span></td>
-      <td>${x.name || "-"}</td>
+      <td>${x.name || x.code || "-"}</td>
       <td>${fmt(x.close, 2)}</td>
       <td>${fmt(x.ma_short, 2)}</td>
       <td>${fmt(x.ma_mid, 2)}</td>
@@ -111,6 +117,7 @@ async function scan() {
   resultArea.innerHTML = `<div class="mutedRow">掃描中，請稍等…</div>`;
 
   try {
+    // ✅ 關鍵：用同網域相對路徑，避免 https -> http 被擋
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -142,10 +149,12 @@ async function scan() {
   }
 }
 
+// 中文備註：初始化時先把規則摘要渲染出來
 (function init() {
   try {
     renderRuleSummary(getRulesFromUI());
   } catch {}
 })();
 
+// 中文備註：把 scan 掛到全域，讓 index.html 的按鈕 onclick="scan()" 能用
 window.scan = scan;
