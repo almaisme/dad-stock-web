@@ -1,142 +1,232 @@
+/* 中文備註：整體背景與字體 */
 :root{
   --bg: #f4f7fb;
   --card: #ffffff;
+  --line: #e6edf5;
   --text: #0f172a;
   --muted: #64748b;
-  --line: #e6edf6;
-  --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
-  --brand: #0b1220;
-  --brand2:#111b2d;
-  --okbg:#eafff0;
-  --okfg:#0f7a2a;
-  --errbg:#ffecec;
-  --errfg:#b42318;
+  --shadow: 0 10px 30px rgba(15,23,42,0.08);
 }
 
 *{ box-sizing: border-box; }
 
 body{
-  margin:0;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Noto Sans TC", sans-serif;
   background: var(--bg);
   color: var(--text);
 }
 
+/* 中文備註：上方標題列 */
 .topbar{
-  display:flex;
+  max-width: 1080px;
+  margin: 28px auto 0;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
   flex-direction: column;
-  align-items:center;
-  gap:12px;
-  padding: 32px 16px 18px;
 }
 
+.topTitle{
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
 .title{
-  font-weight:800;
   font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.ver{
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
 }
 
+/* 中文備註：主按鈕 */
 .primaryBtn{
-  border:0;
-  background: linear-gradient(180deg, var(--brand2), var(--brand));
-  color:#fff;
-  padding: 12px 26px;
+  border: none;
+  padding: 12px 22px;
   border-radius: 12px;
-  font-weight:800;
-  cursor:pointer;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(180deg, #1f2937, #0b1220);
+  box-shadow: 0 10px 25px rgba(15,23,42,0.18);
+  font-weight: 800;
+}
+.primaryBtn:disabled{
+  opacity: .6;
+  cursor: not-allowed;
 }
 
+/* 中文備註：內容包裹 */
 .wrap{
-  display:flex;
-  justify-content:center;
-  padding: 0 16px 48px;
+  max-width: 1080px;
+  margin: 18px auto 48px;
+  padding: 0 18px;
 }
 
-.contentFull{
-  width: min(1000px, 100%);
-  display:flex;
-  flex-direction:column;
-  gap:18px;
+/* 中文備註：單欄內容 */
+.content{
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
+/* 中文備註：卡片 */
 .card{
   background: var(--card);
-  border:1px solid var(--line);
-  border-radius: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
   box-shadow: var(--shadow);
-  padding: 18px;
+  padding: 16px;
 }
 
+.cardHeader{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cardTitle{
+  font-size: 16px;
+  font-weight: 800;
+}
+.cardHint{
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* 中文備註：6格規則區 */
 .grid6{
-  display:grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap:12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 860px){
+  .grid6{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px){
+  .grid6{ grid-template-columns: 1fr; }
 }
 
 .ruleBox{
-  border:1px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px;
   background: #fbfdff;
 }
-
+.ruleLabel{
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 800;
+  margin-bottom: 8px;
+}
 .ruleInput{
-  width:100%;
-  border:0;
-  background:transparent;
+  width: 100%;
+  border: 0;
+  outline: none;
   font-size: 18px;
   font-weight: 900;
+  background: transparent;
+  color: var(--text);
 }
 
+/* 中文備註：摘要框 */
 .summaryBox{
   margin-top: 12px;
-  border:1px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px;
+  background: #ffffff;
+}
+.summaryTitle{
+  font-size: 13px;
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+.summaryList{
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+.summaryList li{
+  margin: 6px 0;
+  color: var(--text);
+  font-weight: 650;
 }
 
+/* 中文備註：狀態膠囊 */
 .pillStatus{
+  padding: 6px 10px;
+  border-radius: 999px;
   font-weight: 900;
   font-size: 12px;
-  padding: 8px 12px;
-  border-radius: 999px;
+  border: 1px solid var(--line);
 }
+.pillStatus.neutral{ background: #f1f5f9; color: #334155; }
+.pillStatus.ok{ background: #dcfce7; border-color: #bbf7d0; color: #166534; }
+.pillStatus.err{ background: #fee2e2; border-color: #fecaca; color: #991b1b; }
 
-.pillStatus.ok{ background: var(--okbg); color: var(--okfg); }
-.pillStatus.err{ background: var(--errbg); color: var(--errfg); }
-.pillStatus.neutral{ background: #eef2ff; color: #3730a3; }
+/* 中文備註：狀態文字 */
+.statusText{
+  font-size: 13px;
+  font-weight: 800;
+  margin: 2px 0 10px;
+}
+.statusText.muted{ color: var(--muted); }
 
+/* 中文備註：結果區 */
 .resultArea{
-  border:1px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px;
-  min-height: 120px;
+  background: #ffffff;
 }
 
-.tableWrap{ overflow:auto; }
-
-table{
-  width:100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-thead th{
-  text-align:left;
-  font-weight:900;
-  padding: 10px;
-  border-bottom: 1px solid var(--line);
-}
-
-tbody td{
-  padding: 12px 10px;
-  border-bottom: 1px solid var(--line);
+.mutedRow{
+  color: var(--muted);
   font-weight: 800;
 }
 
+/* 中文備註：表格 */
+.tableWrap{
+  width: 100%;
+  overflow-x: auto;
+}
+table{
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+th, td{
+  text-align: left;
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 750;
+}
+th{
+  color: #334155;
+  font-weight: 900;
+  background: #fbfdff;
+}
+td{
+  color: #0f172a;
+}
+
+/* 中文備註：代碼膠囊 */
 .codePill{
-  display:inline-block;
+  display: inline-flex;
   padding: 6px 10px;
   border-radius: 999px;
-  background:#eef2ff;
+  background: #eef2ff;
+  border: 1px solid #dbeafe;
   font-weight: 900;
 }
