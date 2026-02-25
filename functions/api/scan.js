@@ -1,32 +1,42 @@
 // functions/api/scan.js
 
-export async function onRequestGet(context) {
-  return new Response(JSON.stringify({
-    ok: true,
-    message: "✅ /api/scan GET 正常 (請用 POST 才會帶 rules)"
-  }), {
-    headers: { "Content-Type": "application/json" }
-  });
-}
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Content-Type": "application/json"
+};
 
-export async function onRequestPost(context) {
-  try {
-    const rules = await context.request.json();
+export async function onRequest(context) {
 
+  // 處理 CORS 預檢
+  if (context.request.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (context.request.method === "GET") {
     return new Response(JSON.stringify({
       ok: true,
-      receivedRules: rules
-    }), {
-      headers: { "Content-Type": "application/json" }
-    });
-
-  } catch (error) {
-    return new Response(JSON.stringify({
-      ok: false,
-      error: error.message
-    }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+      message: "✅ GET 正常"
+    }), { headers: corsHeaders });
   }
+
+  if (context.request.method === "POST") {
+    try {
+      const rules = await context.request.json();
+
+      return new Response(JSON.stringify({
+        ok: true,
+        receivedRules: rules
+      }), { headers: corsHeaders });
+
+    } catch (err) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: err.message
+      }), { status: 500, headers: corsHeaders });
+    }
+  }
+
+  return new Response("Method Not Allowed", { status: 405 });
 }
