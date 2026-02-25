@@ -1,10 +1,8 @@
 // functions/api/scan.js
 // 中文備註：Cloudflare Pages Function：/api/scan
-// V1：固定 Top500 股票池（從 ISIN 抓全市場後切 Top500；抓不到就 fallback）
-// 修正版重點：
-// 1) ISIN 抓不到 → fallback（避免 universe=空導致 0.02s 秒回 0）
-// 2) 不快取「太少/空的 universe」
-// 3) 回傳 diag 診斷
+// 功能：抓 Yahoo Finance 日線資料 → 計算均線/量比 → 依規則篩選 → 回傳給前端表格
+// 進階：股票池 Top 500（自動抓名單），名稱強制繁中（TWSE 即時 API）
+// 注意：外部來源可能偶爾擋請求，所以全程都有 fallback，避免整個流程掛掉
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,6 +11,7 @@ const corsHeaders = {
   "Content-Type": "application/json; charset=utf-8",
 };
 
+// 中文備註：回 JSON 的小工具
 function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -20,114 +19,126 @@ function json(obj, status = 200, extraHeaders = {}) {
   });
 }
 
+// 中文備註：安全取數字
 function toNumber(v, defVal) {
   const n = Number(v);
   return Number.isFinite(n) ? n : defVal;
 }
 
-// 中文備註：ISIN（上市/上櫃）
-const ISIN_URLS = [
-  "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2",
-  "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4",
-];
+// ======================
+// 0) Top 500 股票池（自動抓名單）
+// ======================
 
-// 中文備註：fallback（ISIN 掛掉時至少能掃）
+// 中文備註：抓名單失敗時的保底股票池（至少可跑）
 const FALLBACK_CODES = [
   "2330","2317","2454","2308","2412","2881","2882","2884","2886","2891",
   "1301","1303","2002","2603","2609","2615","3034","2303","3711","2382",
-  "5871","5880","1101","1216","3045","3008","2883","2885","2892","2357",
-  "2379","3231","3661","6415","6505","5269","2207","2327","4938","2395"
 ];
 
-function parseIsinHtmlToList(html) {
-  const list = [];
-  const trMatches = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
-  for (const tr of trMatches) {
-    const tds = tr.match(/<td[\s\S]*?<\/td>/gi) || [];
-    if (tds.length < 1) continue;
+// 中文備註：嘗試抓上市公司名單（openapi.twse.com.tw）
+// 來源可能會變動或偶爾擋，所以要 try/catch + fallback
+async function fetchTWSEList() {
+  // 中文備註：常見的上市公司基本資料 JSON（若來源偶發失效，會 fallback）
+  const url = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L";
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
+  if (!res.ok) throw new Error("TWSE list HTTP " + res.status);
+  const data = await res.json();
 
-    const td0 = tds[0]
-      .replace(/<br\s*\/?>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const m = td0.match(/^(\d{4})\s+(.+)$/);
-    if (!m) continue;
-
-    const code = m[1];
-    const name = (m[2] || "").trim();
-    if (!code || !name) continue;
-
-    list.push({ code, name });
+  // 中文備註：期望欄位：公司代號/公司名稱（不同版本欄位名可能不同，所以做多路徑容錯）
+  const out = [];
+  for (const r of (Array.isArray(data) ? data : [])) {
+    const code = (r["公司代號"] || r["公司代號\n"] || r["CompanyCode"] || r["SecuritiesCompanyCode"] || "").toString().trim();
+    const name = (r["公司名稱"] || r["公司名稱\n"] || r["CompanyName"] || r["SecuritiesCompanyName"] || "").toString().trim();
+    if (!/^\d{4}$/.test(code)) continue;
+    out.push({ code, market: "TWSE", name: name || "" });
   }
-  return list;
+  return out;
 }
 
-async function getUniverseFromIsin(context) {
-  const cache = caches.default;
-  const day = new Date().toISOString().slice(0, 10);
-  const cacheKey = `https://cache.local/universe?d=${day}`;
+// 中文備註：嘗試抓上櫃公司名單（tpex.org.tw openapi）
+// 同樣做容錯，抓不到就回空
+async function fetchTPEXList() {
+  // 中文備註：此 openapi 來源可能不同站點/路徑版本，若失效會 fallback
+  const url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O";
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
+  if (!res.ok) throw new Error("TPEX list HTTP " + res.status);
+  const data = await res.json();
 
+  const out = [];
+  for (const r of (Array.isArray(data) ? data : [])) {
+    const code = (r["公司代號"] || r["CompanyCode"] || "").toString().trim();
+    const name = (r["公司名稱"] || r["CompanyName"] || "").toString().trim();
+    if (!/^\d{4}$/.test(code)) continue;
+    out.push({ code, market: "TPEX", name: name || "" });
+  }
+  return out;
+}
+
+// 中文備註：Top 500 名單快取（每天更新一次）
+async function getTop500Universe() {
+  const today = new Date().toISOString().slice(0, 10);
+  const cacheKey = "https://cache.local/universe?day=" + today;
+  const cache = caches.default;
+
+  // 中文備註：先吃快取
   const hit = await cache.match(cacheKey);
   if (hit) {
     const txt = await hit.text();
     const obj = JSON.parse(txt);
-    return { ...obj, from_cache: true };
+    if (Array.isArray(obj?.list) && obj.list.length > 0) return obj.list;
   }
 
-  const diag = { isin_fetch: [], parsed_count: 0 };
-  const merged = [];
+  // 中文備註：嘗試抓名單（上市 + 上櫃）
+  let list = [];
+  try {
+    const [twse, tpex] = await Promise.allSettled([fetchTWSEList(), fetchTPEXList()]);
+    const a = (twse.status === "fulfilled") ? twse.value : [];
+    const b = (tpex.status === "fulfilled") ? tpex.value : [];
+    list = [...a, ...b];
 
-  for (const url of ISIN_URLS) {
-    try {
-      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-      diag.isin_fetch.push({ url, ok: res.ok, status: res.status });
-      if (!res.ok) continue;
+    // 中文備註：去重（同 code 只留第一個）
+    const seen = new Set();
+    list = list.filter(x => {
+      if (seen.has(x.code)) return false;
+      seen.add(x.code);
+      return true;
+    });
 
-      const html = await res.text();
-      merged.push(...parseIsinHtmlToList(html));
-    } catch (e) {
-      diag.isin_fetch.push({ url, ok: false, status: "fetch_error" });
-    }
+    // 中文備註：Top 500（這裡採「名單順序」取前 500，避免排序依賴額外資料）
+    list = list.slice(0, 500);
+
+    // 中文備註：快取保存
+    const payload = { day: today, list };
+    const res = new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    await cache.put(cacheKey, res);
+    return list.length ? list : FALLBACK_CODES.map(code => ({ code, market: "TWSE", name: "" }));
+  } catch {
+    // 中文備註：整段抓名單失敗就 fallback
+    return FALLBACK_CODES.map(code => ({ code, market: "TWSE", name: "" }));
   }
-
-  const map = new Map();
-  for (const it of merged) if (!map.has(it.code)) map.set(it.code, it.name);
-  const universe = Array.from(map.entries()).map(([code, name]) => ({ code, name }));
-  diag.parsed_count = universe.length;
-
-  // ✅ 太少就不快取，直接 fallback
-  if (universe.length < 100) {
-    const fallback = FALLBACK_CODES.map(code => ({ code, name: code }));
-    return { universe: fallback, from_cache: false, used_fallback: true, diag };
-  }
-
-  const payload = JSON.stringify({ universe, used_fallback: false, diag });
-  const resp = new Response(payload, {
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "public, max-age=21600",
-    },
-  });
-  context.waitUntil(cache.put(cacheKey, resp.clone()));
-
-  return { universe, from_cache: false, used_fallback: false, diag };
 }
 
-// Yahoo
-function buildSymbols(code) {
-  return [`${code}.TW`, `${code}.TWO`];
+// 中文備註：依市場轉 Yahoo symbol（上市 .TW，上櫃 .TWO）
+function toYahooSymbol(code, market) {
+  return market === "TPEX" ? `${code}.TWO` : `${code}.TW`;
 }
 
+// ======================
+// 1) Yahoo 日線資料
+// ======================
+
+// 中文備註：抓 Yahoo 日線（chart API）
+// range 用 6mo：資料較小、速度較快，但仍足夠計算 20MA + lookback
 async function fetchYahooChart(symbol) {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?range=1y&interval=1d&includePrePost=false`;
+    `?range=6mo&interval=1d&includePrePost=false`;
 
   const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "application/json",
+    },
   });
 
   if (!res.ok) throw new Error(`chart HTTP ${res.status}`);
@@ -142,16 +153,72 @@ async function fetchYahooChart(symbol) {
   const closes = quote.close || [];
   const volumes = quote.volume || [];
 
+  // 中文備註：過濾 null
   const rows = [];
   for (let i = 0; i < ts.length; i++) {
     const c = closes[i];
     const v = volumes[i];
     if (c == null || v == null) continue;
-    rows.push({ close: Number(c), volume: Number(v) });
+    rows.push({ t: ts[i], close: Number(c), volume: Number(v) });
   }
+
   if (rows.length < 60) throw new Error("not enough data");
   return rows;
 }
+
+// ======================
+// 2) 名稱繁中：TWSE 即時 API（批次）
+// ======================
+
+// 中文備註：TWSE 即時資料 API，可回傳中文名稱（一次可帶多檔，用 | 分隔）
+// 注意：這是「即時」介面，偶爾會擋或限速，所以拿不到就回空 map（不影響主流程）
+async function fetchTWSEChineseNamesBatch(pairs) {
+  // pairs: [{code, market}]
+  // ex_ch 格式：tse_2330.tw | otc_6488.tw
+  const exCh = pairs.map(x => {
+    const prefix = (x.market === "TPEX") ? "otc" : "tse";
+    return `${prefix}_${x.code}.tw`;
+  }).join("|");
+
+  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${encodeURIComponent(exCh)}&json=1&delay=0`;
+
+  const res = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+  });
+  if (!res.ok) return new Map();
+
+  const data = await res.json().catch(() => null);
+  const list = data?.msgArray || [];
+  const map = new Map();
+
+  for (const it of list) {
+    const code = (it?.c || "").toString().trim();
+    const name = (it?.n || it?.nf || "").toString().trim();
+    if (/^\d{4}$/.test(code) && name) map.set(code, name);
+  }
+  return map;
+}
+
+// 中文備註：把 Top 500 的中文名稱補齊（分批，避免 URL 太長）
+async function fillChineseNames(universe) {
+  const nameMap = new Map();
+  const chunkSize = 50;
+
+  for (let i = 0; i < universe.length; i += chunkSize) {
+    const chunk = universe.slice(i, i + chunkSize);
+    try {
+      const m = await fetchTWSEChineseNamesBatch(chunk);
+      for (const [k, v] of m.entries()) nameMap.set(k, v);
+    } catch {
+      // 中文備註：單批失敗就跳過，不中斷
+    }
+  }
+  return nameMap;
+}
+
+// ======================
+// 3) 技術指標：SMA / 均量 / 糾結判斷
+// ======================
 
 function sma(values, window) {
   if (values.length < window) return null;
@@ -167,6 +234,7 @@ function avg(values, window) {
   return sum / window;
 }
 
+// 中文備註：判斷「三線糾結」：最近 lookback 天內，三條均線的最大擴散 <= 閾值
 function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
   const n = closes.length;
   const start = Math.max(0, n - lookbackDays);
@@ -189,16 +257,47 @@ function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
   return true;
 }
 
+// ======================
+// 4) 併發限制（避免 500 檔同時打爆/超時）
+// ======================
+
+async function mapLimit(list, limit, mapper) {
+  const ret = [];
+  let idx = 0;
+
+  const workers = Array.from({ length: limit }).map(async () => {
+    while (idx < list.length) {
+      const cur = idx++;
+      try {
+        ret[cur] = await mapper(list[cur], cur);
+      } catch (e) {
+        ret[cur] = null;
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return ret;
+}
+
+// ======================
+// 5) 主入口
+// ======================
+
 export async function onRequest(context) {
   const { request } = context;
 
+  // 中文備註：CORS 預檢
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // 中文備註：健康檢查
   if (request.method === "GET") {
     return json({ ok: true, message: "✅ /api/scan 正常（請用 POST）" });
   }
 
-  if (request.method !== "POST") return json({ ok: false, error: "Method Not Allowed" }, 405);
+  if (request.method !== "POST") {
+    return json({ ok: false, error: "Method Not Allowed" }, 405);
+  }
 
   const t0 = Date.now();
 
@@ -206,30 +305,27 @@ export async function onRequest(context) {
     const body = await request.json();
     const rules = body?.rules || {};
 
+    // 中文備註：讀規則（跟 app.js 的 rules 欄位一致）
     const ma_short = toNumber(rules.ma_short, 5);
     const ma_mid = toNumber(rules.ma_mid, 10);
     const ma_long = toNumber(rules.ma_long, 20);
 
     const tangle_lookback_days = toNumber(rules.tangle_lookback_days, 5);
-    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.03);
+    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.05); // 已經是小數（5% = 0.05）
 
-    const volume_multiplier = toNumber(rules.volume_multiplier, 0.8);
+    const volume_multiplier = toNumber(rules.volume_multiplier, 0.5);
     const volume_ma_days = toNumber(rules.volume_ma_days, 10);
 
-    const cache_ttl_seconds = Math.max(0, toNumber(rules.cache_ttl_seconds, 1200));
+    const cache_ttl_seconds = Math.max(0, toNumber(rules.cache_ttl_seconds, 600));
 
-    // ✅ V1 固定 Top500
-    const pool_size = 500;
-
-    const day = new Date().toISOString().slice(0, 10);
+    // 中文備註：快取 key（同一組規則在 TTL 內就直接回）
     const cacheKeyObj = {
       ma_short, ma_mid, ma_long,
       tangle_lookback_days,
       tangle_max_spread_pct,
       volume_multiplier,
       volume_ma_days,
-      pool_size,
-      day,
+      day: new Date().toISOString().slice(0, 10),
     };
     const cacheKey = "https://cache.local/scan?" + encodeURIComponent(JSON.stringify(cacheKeyObj));
     const cache = caches.default;
@@ -242,64 +338,58 @@ export async function onRequest(context) {
       }
     }
 
-    const uni = await getUniverseFromIsin(context);
-    const rawUniverse = uni?.universe || [];
-    const universe = rawUniverse.slice(0, pool_size);
+    // ✅ 中文備註：Top 500 股票池
+    const universe = await getTop500Universe();
 
-    const diag = {
-      universe_total: rawUniverse.length,
-      universe_used: universe.length,
-      universe_from_cache: !!uni.from_cache,
-      universe_used_fallback: !!uni.used_fallback,
-      isin_diag: uni.diag || null,
-      yahoo_ok: 0,
-      yahoo_fail: 0,
-    };
+    // ✅ 中文備註：先補齊繁中名稱（盡量抓，抓不到也不影響掃描）
+    const chineseNameMap = await fillChineseNames(universe);
 
-    const items = [];
+    // 中文備註：開始掃描（併發限制：同時 10 檔，穩定且較不易被擋）
+    const results = await mapLimit(universe, 10, async (u) => {
+      const code = u.code;
+      const market = u.market;
+      const symbol = toYahooSymbol(code, market);
 
-    for (const { code, name } of universe) {
-      const candidates = buildSymbols(code);
-      let rows = null;
-
-      for (const sym of candidates) {
-        try {
-          rows = await fetchYahooChart(sym);
-          diag.yahoo_ok += 1;
-          break;
-        } catch (e) {}
-      }
-
-      if (!rows) {
-        diag.yahoo_fail += 1;
-        continue;
-      }
+      // 1) Yahoo 日線
+      const rows = await fetchYahooChart(symbol);
 
       const closes = rows.map(r => r.close);
       const vols = rows.map(r => r.volume);
 
+      // 今日數據
       const close = closes[closes.length - 1];
       const volume = vols[vols.length - 1];
 
+      // 今日三條 MA
       const maS = sma(closes, ma_short);
       const maM = sma(closes, ma_mid);
       const maL = sma(closes, ma_long);
-      if (maS == null || maM == null || maL == null) continue;
+      if (maS == null || maM == null || maL == null) return null;
 
+      // 均量 + 量比
       const vma = avg(vols, volume_ma_days);
-      if (vma == null || vma <= 0) continue;
+      if (vma == null || vma <= 0) return null;
       const vol_ratio = volume / vma;
 
+      // 篩選條件
       const tangled = isTangled(closes, ma_short, ma_mid, ma_long, tangle_lookback_days, tangle_max_spread_pct);
-      if (!tangled) continue;
+      if (!tangled) return null;
 
-      if (!(maS > maM && maM > maL)) continue;
-      if (!(close >= maS && close >= maM && close >= maL)) continue;
-      if (!(vol_ratio >= volume_multiplier)) continue;
+      // 均線多頭排列（短 > 中 > 長）
+      if (!(maS > maM && maM > maL)) return null;
 
-      items.push({
+      // 收盤站上三線
+      if (!(close >= maS && close >= maM && close >= maL)) return null;
+
+      // 量能條件
+      if (!(vol_ratio >= volume_multiplier)) return null;
+
+      // ✅ 名稱優先用「繁中名稱」，沒有就用名單內 name，再沒有就 code
+      const zhName = chineseNameMap.get(code) || u.name || code;
+
+      return {
         code,
-        name: name || code,
+        name: zhName,
         close,
         ma_short: maS,
         ma_mid: maM,
@@ -307,9 +397,13 @@ export async function onRequest(context) {
         volume,
         vma,
         vol_ratio,
-      });
-    }
+      };
+    });
 
+    // 中文備註：過濾 null
+    const items = results.filter(Boolean);
+
+    // 中文備註：排序（量比由大到小）
     items.sort((a, b) => (b.vol_ratio || 0) - (a.vol_ratio || 0));
 
     const elapsed_sec = ((Date.now() - t0) / 1000).toFixed(2);
@@ -319,9 +413,9 @@ export async function onRequest(context) {
       cached: false,
       elapsed_sec,
       items,
-      diag,
     };
 
+    // 中文備註：寫入快取
     if (cache_ttl_seconds > 0) {
       const res = json(payload, 200, { "Cache-Control": `public, max-age=${cache_ttl_seconds}` });
       context.waitUntil(cache.put(cacheKey, res.clone()));
