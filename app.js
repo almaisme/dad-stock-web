@@ -1,6 +1,6 @@
 // app.js
 // 中文備註：前端邏輯（Cloudflare Pages + Functions）
-// 重要：一律使用相對路徑 /api/scan，避免 https -> http 混合內容造成 Failed to fetch
+// 重要：一律使用相對路徑 /api/scan，避免 https 頁面打到 http API 造成 Failed to fetch（混合內容被擋）
 
 function toNumber(v, defVal) {
   const n = Number(v);
@@ -13,20 +13,16 @@ function fmt(n, d = 2) {
 }
 
 function getRulesFromUI() {
-  // 中文備註：均線輸入格式 "5,10,20"
   const maStr = (document.getElementById("maStr")?.value || "5,10,20").trim();
   const parts = maStr.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
   const [ma_short, ma_mid, ma_long] = (parts.length >= 3) ? parts : [5, 10, 20];
 
-  // 中文備註：糾結參數（% 轉成小數）
-  const tangle_lookback_days = toNumber(document.getElementById("tangleLookback")?.value, 10);
-  const tangle_max_spread_pct = toNumber(document.getElementById("tangleSpreadPct")?.value, 1.5) / 100.0;
+  const tangle_lookback_days = toNumber(document.getElementById("tangleLookback")?.value, 5);
+  const tangle_max_spread_pct = toNumber(document.getElementById("tangleSpreadPct")?.value, 5.0) / 100.0;
 
-  // 中文備註：量能參數
-  const volume_multiplier = toNumber(document.getElementById("volMultiplier")?.value, 1.0);
+  const volume_multiplier = toNumber(document.getElementById("volMultiplier")?.value, 0.6);
   const volume_ma_days = toNumber(document.getElementById("volMaDays")?.value, 10);
 
-  // 中文備註：快取（分鐘 → 秒）
   const cacheMin = toNumber(document.getElementById("cacheMin")?.value, 10);
   const cache_ttl_seconds = Math.max(0, Math.floor(cacheMin * 60));
 
@@ -41,7 +37,6 @@ function getRulesFromUI() {
 }
 
 function renderRuleSummary(rules) {
-  // 中文備註：把目前規則變成人看得懂的摘要
   const ul = document.getElementById("ruleSummary");
   if (!ul) return;
 
@@ -116,7 +111,6 @@ async function scan() {
   resultArea.innerHTML = `<div class="mutedRow">掃描中，請稍等…</div>`;
 
   try {
-    // ✅ 關鍵：同網域相對路徑 /api/scan
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -148,12 +142,10 @@ async function scan() {
   }
 }
 
-// 中文備註：初始化時先把規則摘要渲染出來
 (function init() {
   try {
     renderRuleSummary(getRulesFromUI());
   } catch {}
 })();
 
-// 中文備註：讓 index.html 的 onclick="scan()" 找得到
 window.scan = scan;
