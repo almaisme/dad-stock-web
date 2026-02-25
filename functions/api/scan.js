@@ -1,7 +1,7 @@
 // functions/api/scan.js
 // 中文備註：Cloudflare Pages Function：/api/scan
 // 功能：抓 Yahoo Finance 日線資料 → 計算均線/量比 → 依規則篩選 → 回傳給前端表格
-// 注意：為了避免一次掃全市場超時，先內建「股票池」(你可自行加碼)
+// 重點修正：名稱不要再用 quote API（常被擋），改從 chart API 的 meta.shortName/longName 取得
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,7 +37,9 @@ function buildSymbols(code) {
   return [`${code}.TW`, `${code}.TWO`];
 }
 
-// 中文備註：抓 Yahoo 日線（chart API）
+// 中文備註：抓 Yahoo 日線（用 chart API）
+// range 用 1y，足夠算 20MA + lookback
+// ✅ 這裡同時回傳 metaName（用來顯示「名稱」）
 async function fetchYahooChart(symbol) {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
@@ -45,9 +47,9 @@ async function fetchYahooChart(symbol) {
 
   const res = await fetch(url, {
     headers: {
+      // 中文備註：加 UA 有時比較不容易被擋
       "User-Agent": "Mozilla/5.0",
       "Accept": "application/json",
-      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     },
   });
 
@@ -57,6 +59,10 @@ async function fetchYahooChart(symbol) {
   const result = data?.chart?.result?.[0];
   const err = data?.chart?.error;
   if (!result || err) throw new Error(`chart error: ${err?.description || "no result"}`);
+
+  // ✅ 中文備註：名稱直接從 chart meta 拿（成功率高）
+  const meta = result.meta || {};
+  const metaName = meta.shortName || meta.longName || "";
 
   const ts = result.timestamp || [];
   const quote = result.indicators?.quote?.[0] || {};
@@ -73,33 +79,7 @@ async function fetchYahooChart(symbol) {
   }
 
   if (rows.length < 60) throw new Error("not enough data");
-  return rows;
-}
-
-// 中文備註：批次抓名稱（Yahoo quote API）
-async function fetchYahooNames(symbols) {
-  const url =
-    `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}`;
-
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      "Accept": "application/json",
-      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-    },
-  });
-
-  if (!res.ok) return new Map();
-  const data = await res.json();
-  const list = data?.quoteResponse?.result || [];
-
-  const map = new Map();
-  for (const it of list) {
-    if (!it?.symbol) continue;
-    const name = it.shortName || it.longName || "";
-    map.set(it.symbol, name);
-  }
-  return map;
+  return { rows, metaName };
 }
 
 // 中文備註：計算簡單移動平均（SMA）
@@ -118,12 +98,13 @@ function avg(values, window) {
   return sum / window;
 }
 
-// 中文備註：「三線糾結」：最近 lookback 天內，每一天三條 MA 的最大擴散 <= 閾值
+// 中文備註：判斷「三線糾結」：最近 lookback 天內，三條均線的最大擴散 <= 閾值
 function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
   const n = closes.length;
   const start = Math.max(0, n - lookbackDays);
 
   for (let i = start; i < n; i++) {
+    // 中文備註：每一天都要能算出三條 MA
     const slice = closes.slice(0, i + 1);
     const s = sma(slice, maS);
     const m = sma(slice, maM);
@@ -148,7 +129,7 @@ export async function onRequest(context) {
   // 中文備註：CORS 預檢
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  // 中文備註：健康檢查（你開 /api/scan 會看到這句）
+  // 中文備註：健康檢查
   if (request.method === "GET") {
     return json({ ok: true, message: "✅ /api/scan 正常（請用 POST）" });
   }
@@ -163,7 +144,7 @@ export async function onRequest(context) {
     const body = await request.json();
     const rules = body?.rules || {};
 
-    // 中文備註：讀規則（跟 app.js 一致）
+    // 中文備註：讀規則（跟你 app.js 的 rules 欄位一致）
     const ma_short = toNumber(rules.ma_short, 5);
     const ma_mid = toNumber(rules.ma_mid, 10);
     const ma_long = toNumber(rules.ma_long, 20);
@@ -176,7 +157,7 @@ export async function onRequest(context) {
 
     const cache_ttl_seconds = Math.max(0, toNumber(rules.cache_ttl_seconds, 600));
 
-    // 中文備註：快取 key（同一組規則 + 今日日期）
+    // 中文備註：快取 key（同一組規則在 TTL 內就直接回）
     const cacheKeyObj = {
       ma_short, ma_mid, ma_long,
       tangle_lookback_days,
@@ -197,20 +178,24 @@ export async function onRequest(context) {
     }
 
     const items = [];
-    const resolvedSymbols = [];
 
     for (const code of UNIVERSE_CODES) {
       const candidates = buildSymbols(code);
 
       let rows = null;
       let usedSymbol = null;
+      let nameFromMeta = "";
 
       for (const sym of candidates) {
         try {
-          rows = await fetchYahooChart(sym);
+          const got = await fetchYahooChart(sym);
+          rows = got.rows;
           usedSymbol = sym;
+          nameFromMeta = got.metaName || "";
           break;
-        } catch (_) {}
+        } catch (e) {
+          // 中文備註：這個 symbol 失敗就試下一個
+        }
       }
 
       if (!rows || !usedSymbol) continue;
@@ -218,23 +203,34 @@ export async function onRequest(context) {
       const closes = rows.map(r => r.close);
       const vols = rows.map(r => r.volume);
 
+      // 中文備註：今日數據
       const close = closes[closes.length - 1];
       const volume = vols[vols.length - 1];
 
+      // 中文備註：今日三條 MA
       const maS = sma(closes, ma_short);
       const maM = sma(closes, ma_mid);
       const maL = sma(closes, ma_long);
       if (maS == null || maM == null || maL == null) continue;
 
+      // 中文備註：均量 + 量比
       const vma = avg(vols, volume_ma_days);
       if (vma == null || vma <= 0) continue;
       const vol_ratio = volume / vma;
 
+      // ✅ 篩選條件
       // 1) 三線糾結
-      const tangled = isTangled(closes, ma_short, ma_mid, ma_long, tangle_lookback_days, tangle_max_spread_pct);
+      const tangled = isTangled(
+        closes,
+        ma_short,
+        ma_mid,
+        ma_long,
+        tangle_lookback_days,
+        tangle_max_spread_pct
+      );
       if (!tangled) continue;
 
-      // 2) 多頭排列（短 > 中 > 長）
+      // 2) 均線多頭排列（短 > 中 > 長）
       if (!(maS > maM && maM > maL)) continue;
 
       // 3) 收盤站上三線
@@ -245,8 +241,8 @@ export async function onRequest(context) {
 
       items.push({
         code,
-        symbol: usedSymbol,
-        name: "",
+        // ✅ 中文備註：名稱直接用 chart meta 的 shortName/longName（沒拿到才退回代碼）
+        name: (nameFromMeta && String(nameFromMeta).trim()) ? String(nameFromMeta).trim() : code,
         close,
         ma_short: maS,
         ma_mid: maM,
@@ -255,15 +251,6 @@ export async function onRequest(context) {
         vma,
         vol_ratio,
       });
-
-      resolvedSymbols.push(usedSymbol);
-    }
-
-    // 中文備註：批次補名稱
-    const nameMap = resolvedSymbols.length ? await fetchYahooNames(resolvedSymbols) : new Map();
-    for (const it of items) {
-      it.name = nameMap.get(it.symbol) || it.code;
-      delete it.symbol;
     }
 
     // 中文備註：排序（量比由大到小）
