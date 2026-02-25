@@ -1,6 +1,6 @@
 // app.js
 // 中文備註：前端邏輯（Cloudflare Pages + Functions）
-// 重要：一律使用相對路徑 /api/scan，避免 https 頁面打到 http API 造成 Failed to fetch（混合內容被擋）
+// 重要：一律使用相對路徑 /api/scan，避免混合內容
 
 function toNumber(v, defVal) {
   const n = Number(v);
@@ -12,14 +12,10 @@ function fmt(n, d = 2) {
   return Number(n).toFixed(d);
 }
 
-// 中文備註：從 UI 讀取規則設定
+// 中文備註：從 UI 讀取規則
 function getRulesFromUI() {
   const maStr = (document.getElementById("maStr")?.value || "5,10,20").trim();
-  const parts = maStr
-    .split(",")
-    .map(s => Number(s.trim()))
-    .filter(n => Number.isFinite(n) && n > 0);
-
+  const parts = maStr.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
   const [ma_short, ma_mid, ma_long] = (parts.length >= 3) ? parts : [5, 10, 20];
 
   const tangle_lookback_days = toNumber(document.getElementById("tangleLookback")?.value, 10);
@@ -41,10 +37,10 @@ function getRulesFromUI() {
   };
 }
 
-// 中文備註：把回傳 items 轉成表格
+// 中文備註：渲染表格（長得像你要的那種清單）
 function renderTable(items) {
   if (!items || items.length === 0) {
-    return `<div class="mutedRow">沒有符合條件的標的（或資料來源暫時擋請求）。</div>`;
+    return `<div class="muted">沒有符合條件的標的（或資料來源暫時擋請求）。</div>`;
   }
 
   const rows = items.map(x => `
@@ -83,20 +79,26 @@ function renderTable(items) {
   `;
 }
 
-// 中文備註：主流程（按鈕按下後呼叫 /api/scan）
+// 中文備註：更新右上角狀態（尚未/成功/失敗）
+function setBadge(type, text) {
+  const badge = document.getElementById("statusBadge");
+  if (!badge) return;
+  badge.className = `badge ${type}`;
+  badge.textContent = text;
+}
+
 async function scan() {
   const btn = document.getElementById("scanBtn");
-  const status = document.getElementById("status");
   const resultArea = document.getElementById("resultArea");
 
   btn.disabled = true;
-  status.textContent = "搜尋中…";
-  resultArea.innerHTML = `<div class="mutedRow">掃描中，請稍等…</div>`;
+  setBadge("neutral", "搜尋中…");
+  resultArea.innerHTML = `<div class="muted">掃描中，請稍等…</div>`;
 
   try {
     const rules = getRulesFromUI();
 
-    // ✅ 關鍵：用同網域相對路徑，避免 https -> http 被擋
+    // ✅ 關鍵：永遠用相對路徑
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -109,23 +111,18 @@ async function scan() {
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
 
-    const msg = [
-      `完成 ✅`,
-      `符合：${data.count ?? 0}`,
-      data.cached ? `（快取）` : ``,
-      (data.elapsed_sec !== undefined) ? `耗時：${data.elapsed_sec}s` : ``,
-    ].filter(Boolean).join("　");
+    const msg = `完成 ✅（符合 ${data.count ?? 0}）${data.cached ? "（快取）" : ""}`;
+    setBadge("ok", msg);
 
-    status.textContent = msg;
     resultArea.innerHTML = renderTable(data.items);
 
   } catch (e) {
-    status.textContent = "失敗 ❌";
-    resultArea.innerHTML = `<div class="mutedRow">呼叫失敗：${String(e?.message || e)}</div>`;
+    setBadge("bad", "失敗 ❌");
+    resultArea.innerHTML = `<div class="muted">呼叫失敗：${String(e?.message || e)}</div>`;
   } finally {
     btn.disabled = false;
   }
 }
 
-// 中文備註：掛到全域，讓 index.html 的 onclick="scan()" 能用
+// 中文備註：掛到全域，讓 onclick="scan()" 可用
 window.scan = scan;
