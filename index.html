@@ -3,29 +3,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>台股搜尋器 V1.0</title>
+  <title>台股全市場掃描引擎 V1</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 
 <body>
-  <!-- 中文備註：頁首 -->
+  <!-- 中文備註：頁首（按鈕加大，手機也好按） -->
   <header class="topbar">
     <div class="topTitle">
-      <div class="title">台股搜尋器</div>
-      <div class="ver">V1.0</div>
+      <div class="title">台股全市場掃描引擎</div>
+      <div class="ver">V1</div>
     </div>
 
     <button id="scanBtn" class="primaryBtn" onclick="scan()">一鍵搜尋</button>
   </header>
 
-  <!-- 中文備註：主內容區（單欄卡片） -->
+  <!-- 中文備註：主內容 -->
   <main class="wrap">
     <section class="content">
       <!-- 規則卡 -->
       <div class="card">
         <div class="cardHeader">
-          <div class="cardTitle">可隨意修改規則</div>
-          <div class="cardHint">資料來源：Yahoo！股市</div>
+          <div>
+            <div class="cardTitle">可隨意修改規則</div>
+            <div class="cardHint">名稱來源：證交所/櫃買 ISIN 清單（繁體中文）｜價格/均線：Yahoo 日線</div>
+          </div>
+
+          <!-- 中文備註：股票池（Top N） -->
+          <div class="poolBox">
+            <div class="poolLabel">股票池</div>
+            <select id="poolSize" class="poolSelect">
+              <option value="200">Top 200</option>
+              <option value="500" selected>Top 500（推薦）</option>
+              <option value="800">Top 800（較慢）</option>
+            </select>
+          </div>
         </div>
 
         <!-- 中文備註：規則輸入（6 格） -->
@@ -36,21 +48,18 @@
           </div>
 
           <div class="ruleBox">
-            <div class="ruleLabel">糾結回看天數</div>
-            <!-- 中文備註：預設改寬鬆：5 -->
+            <div class="ruleLabel">糾結回看天數（寬鬆）</div>
             <input id="tangleLookback" class="ruleInput" value="5" />
           </div>
 
           <div class="ruleBox">
-            <div class="ruleLabel">糾結最大擴散（%）</div>
-            <!-- 中文備註：預設改寬鬆：5 -->
-            <input id="tangleSpreadPct" class="ruleInput" value="5" />
+            <div class="ruleLabel">糾結最大擴散（%）（寬鬆）</div>
+            <input id="tangleSpreadPct" class="ruleInput" value="3.0" />
           </div>
 
           <div class="ruleBox">
-            <div class="ruleLabel">量能條件（今日量 ≥ 均量 × 倍數）</div>
-            <!-- 中文備註：預設改寬鬆：0.5 -->
-            <input id="volMultiplier" class="ruleInput" value="0.5" />
+            <div class="ruleLabel">量能（今日量 ≥ 均量 × 倍數）（寬鬆）</div>
+            <input id="volMultiplier" class="ruleInput" value="0.8" />
           </div>
 
           <div class="ruleBox">
@@ -60,7 +69,7 @@
 
           <div class="ruleBox">
             <div class="ruleLabel">快取分鐘（避免一直掃被擋）</div>
-            <input id="cacheMin" class="ruleInput" value="10" />
+            <input id="cacheMin" class="ruleInput" value="20" />
           </div>
         </div>
 
@@ -73,17 +82,13 @@
 
       <!-- 搜尋結果卡 -->
       <div class="card">
-        <div class="cardHeader">
+        <div class="cardHeader rowBetween">
           <div class="cardTitle">搜尋結果</div>
-
-          <!-- 右上角狀態膠囊 -->
           <div id="statusPill" class="pillStatus neutral">尚未搜尋</div>
         </div>
 
-        <!-- 狀態文字（例如錯誤訊息） -->
         <div id="statusText" class="statusText muted">按上方「一鍵搜尋」開始掃描。</div>
 
-        <!-- 結果區 -->
         <div id="resultArea" class="resultArea">
           <div class="mutedRow">尚未搜尋</div>
         </div>
