@@ -1,7 +1,6 @@
 // functions/api/scan.js
 // 中文備註：Cloudflare Pages Function：/api/scan
 // 功能：抓 Yahoo Finance 日線資料 → 計算均線/量比 → 依規則篩選 → 回傳給前端表格
-// 重點修正：名稱不要再用 quote API（常被擋），改從 chart API 的 meta.shortName/longName 取得
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -32,14 +31,36 @@ const UNIVERSE_CODES = [
   "2615", "3034", "2303", "3711", "2382",
 ];
 
+// ✅ 中文備註：繁中名稱兜底對照（Yahoo 偶爾回英文，這裡用代碼補）
+const ZH_NAME_FALLBACK = {
+  "2330": "台積電",
+  "2317": "鴻海",
+  "2454": "聯發科",
+  "2308": "台達電",
+  "2412": "中華電",
+  "2881": "富邦金",
+  "2882": "國泰金",
+  "2884": "玉山金",
+  "2886": "兆豐金",
+  "2891": "中信金",
+  "1301": "台塑",
+  "1303": "南亞",
+  "2002": "中鋼",
+  "2603": "長榮",
+  "2609": "陽明",
+  "2615": "萬海",
+  "3034": "聯詠",
+  "2303": "聯電",
+  "3711": "日月光投控",
+  "2382": "廣達",
+};
+
 // 中文備註：把 2330 轉成 Yahoo symbol（先試 .TW，失敗再試 .TWO）
 function buildSymbols(code) {
   return [`${code}.TW`, `${code}.TWO`];
 }
 
-// 中文備註：抓 Yahoo 日線（用 chart API）
-// range 用 1y，足夠算 20MA + lookback
-// ✅ 這裡同時回傳 metaName（用來顯示「名稱」）
+// 中文備註：抓 Yahoo 日線（chart API）
 async function fetchYahooChart(symbol) {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
@@ -47,7 +68,6 @@ async function fetchYahooChart(symbol) {
 
   const res = await fetch(url, {
     headers: {
-      // 中文備註：加 UA 有時比較不容易被擋
       "User-Agent": "Mozilla/5.0",
       "Accept": "application/json",
     },
@@ -60,16 +80,11 @@ async function fetchYahooChart(symbol) {
   const err = data?.chart?.error;
   if (!result || err) throw new Error(`chart error: ${err?.description || "no result"}`);
 
-  // ✅ 中文備註：名稱直接從 chart meta 拿（成功率高）
-  const meta = result.meta || {};
-  const metaName = meta.shortName || meta.longName || "";
-
   const ts = result.timestamp || [];
   const quote = result.indicators?.quote?.[0] || {};
   const closes = quote.close || [];
   const volumes = quote.volume || [];
 
-  // 中文備註：過濾 null
   const rows = [];
   for (let i = 0; i < ts.length; i++) {
     const c = closes[i];
@@ -79,7 +94,35 @@ async function fetchYahooChart(symbol) {
   }
 
   if (rows.length < 60) throw new Error("not enough data");
-  return { rows, metaName };
+  return rows;
+}
+
+// ✅ 中文備註：批次抓名稱（quote API），加上 zh-TW / TW 參數，優先拿繁中
+async function fetchYahooNames(symbols) {
+  const url =
+    `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}` +
+    `&lang=zh-TW&region=TW`;
+
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "application/json",
+    },
+  });
+
+  if (!res.ok) return new Map();
+  const data = await res.json();
+  const list = data?.quoteResponse?.result || [];
+
+  const map = new Map();
+  for (const it of list) {
+    if (!it?.symbol) continue;
+
+    // 中文備註：有些會回 longName/shortName，這裡都吃，優先 longName
+    const name = it.longName || it.shortName || "";
+    map.set(it.symbol, name);
+  }
+  return map;
 }
 
 // 中文備註：計算簡單移動平均（SMA）
@@ -98,13 +141,12 @@ function avg(values, window) {
   return sum / window;
 }
 
-// 中文備註：判斷「三線糾結」：最近 lookback 天內，三條均線的最大擴散 <= 閾值
+// 中文備註：判斷「三線糾結」
 function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
   const n = closes.length;
   const start = Math.max(0, n - lookbackDays);
 
   for (let i = start; i < n; i++) {
-    // 中文備註：每一天都要能算出三條 MA
     const slice = closes.slice(0, i + 1);
     const s = sma(slice, maS);
     const m = sma(slice, maM);
@@ -116,7 +158,7 @@ function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
     const c = closes[i] || 0;
     if (c <= 0) return false;
 
-    const spread = (mx - mn) / c; // 中文備註：以收盤價當分母
+    const spread = (mx - mn) / c;
     if (spread > maxSpreadPct) return false;
   }
 
@@ -126,10 +168,8 @@ function isTangled(closes, maS, maM, maL, lookbackDays, maxSpreadPct) {
 export async function onRequest(context) {
   const { request } = context;
 
-  // 中文備註：CORS 預檢
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  // 中文備註：健康檢查
   if (request.method === "GET") {
     return json({ ok: true, message: "✅ /api/scan 正常（請用 POST）" });
   }
@@ -144,20 +184,18 @@ export async function onRequest(context) {
     const body = await request.json();
     const rules = body?.rules || {};
 
-    // 中文備註：讀規則（跟你 app.js 的 rules 欄位一致）
     const ma_short = toNumber(rules.ma_short, 5);
     const ma_mid = toNumber(rules.ma_mid, 10);
     const ma_long = toNumber(rules.ma_long, 20);
 
-    const tangle_lookback_days = toNumber(rules.tangle_lookback_days, 10);
-    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.015); // 小數（1.5% = 0.015）
+    const tangle_lookback_days = toNumber(rules.tangle_lookback_days, 5);
+    const tangle_max_spread_pct = toNumber(rules.tangle_max_spread_pct, 0.05); // 5% 預設較寬鬆
 
-    const volume_multiplier = toNumber(rules.volume_multiplier, 1.0);
+    const volume_multiplier = toNumber(rules.volume_multiplier, 0.6);
     const volume_ma_days = toNumber(rules.volume_ma_days, 10);
 
     const cache_ttl_seconds = Math.max(0, toNumber(rules.cache_ttl_seconds, 600));
 
-    // 中文備註：快取 key（同一組規則在 TTL 內就直接回）
     const cacheKeyObj = {
       ma_short, ma_mid, ma_long,
       tangle_lookback_days,
@@ -178,24 +216,20 @@ export async function onRequest(context) {
     }
 
     const items = [];
+    const resolvedSymbols = [];
 
     for (const code of UNIVERSE_CODES) {
       const candidates = buildSymbols(code);
 
       let rows = null;
       let usedSymbol = null;
-      let nameFromMeta = "";
 
       for (const sym of candidates) {
         try {
-          const got = await fetchYahooChart(sym);
-          rows = got.rows;
+          rows = await fetchYahooChart(sym);
           usedSymbol = sym;
-          nameFromMeta = got.metaName || "";
           break;
-        } catch (e) {
-          // 中文備註：這個 symbol 失敗就試下一個
-        }
+        } catch (e) {}
       }
 
       if (!rows || !usedSymbol) continue;
@@ -203,46 +237,30 @@ export async function onRequest(context) {
       const closes = rows.map(r => r.close);
       const vols = rows.map(r => r.volume);
 
-      // 中文備註：今日數據
       const close = closes[closes.length - 1];
       const volume = vols[vols.length - 1];
 
-      // 中文備註：今日三條 MA
       const maS = sma(closes, ma_short);
       const maM = sma(closes, ma_mid);
       const maL = sma(closes, ma_long);
       if (maS == null || maM == null || maL == null) continue;
 
-      // 中文備註：均量 + 量比
       const vma = avg(vols, volume_ma_days);
       if (vma == null || vma <= 0) continue;
       const vol_ratio = volume / vma;
 
-      // ✅ 篩選條件
-      // 1) 三線糾結
-      const tangled = isTangled(
-        closes,
-        ma_short,
-        ma_mid,
-        ma_long,
-        tangle_lookback_days,
-        tangle_max_spread_pct
-      );
+      // 篩選條件
+      const tangled = isTangled(closes, ma_short, ma_mid, ma_long, tangle_lookback_days, tangle_max_spread_pct);
       if (!tangled) continue;
 
-      // 2) 均線多頭排列（短 > 中 > 長）
       if (!(maS > maM && maM > maL)) continue;
-
-      // 3) 收盤站上三線
       if (!(close >= maS && close >= maM && close >= maL)) continue;
-
-      // 4) 量能條件
       if (!(vol_ratio >= volume_multiplier)) continue;
 
       items.push({
         code,
-        // ✅ 中文備註：名稱直接用 chart meta 的 shortName/longName（沒拿到才退回代碼）
-        name: (nameFromMeta && String(nameFromMeta).trim()) ? String(nameFromMeta).trim() : code,
+        symbol: usedSymbol,
+        name: "", // 先空，後面補
         close,
         ma_short: maS,
         ma_mid: maM,
@@ -251,9 +269,19 @@ export async function onRequest(context) {
         vma,
         vol_ratio,
       });
+
+      resolvedSymbols.push(usedSymbol);
     }
 
-    // 中文備註：排序（量比由大到小）
+    // ✅ 中文備註：批次補名稱 + 繁中兜底
+    const nameMap = resolvedSymbols.length ? await fetchYahooNames(resolvedSymbols) : new Map();
+    for (const it of items) {
+      const fromYahoo = nameMap.get(it.symbol) || "";
+      const fallback = ZH_NAME_FALLBACK[it.code] || "";
+      it.name = (fromYahoo && fromYahoo.trim()) ? fromYahoo.trim() : (fallback || it.code);
+      delete it.symbol;
+    }
+
     items.sort((a, b) => (b.vol_ratio || 0) - (a.vol_ratio || 0));
 
     const elapsed_sec = ((Date.now() - t0) / 1000).toFixed(2);
@@ -265,7 +293,6 @@ export async function onRequest(context) {
       items,
     };
 
-    // 中文備註：寫入快取
     if (cache_ttl_seconds > 0) {
       const res = json(payload, 200, { "Cache-Control": `public, max-age=${cache_ttl_seconds}` });
       context.waitUntil(cache.put(cacheKey, res.clone()));
